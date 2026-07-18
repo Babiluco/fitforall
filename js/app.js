@@ -244,13 +244,6 @@ function weekProgress(){
   return {done, total};
 }
 
-function startOfWeek(d){
-  const date = new Date(d);
-  const day = date.getDay();
-  date.setDate(date.getDate()-day);
-  date.setHours(0,0,0,0);
-  return date;
-}
 
 function nextWorkout(){
   const d = new Date();
@@ -277,10 +270,6 @@ function bmi(){
   return (state.user.weight/(h*h)).toFixed(1);
 }
 
-function fmtDate(key){
-  const [y,m,d] = key.split('-');
-  return `${d}/${m}/${y}`;
-}
 
 /* ======================================================================
    VIEW: DASHBOARD
@@ -1111,14 +1100,18 @@ function startRestOverlay(seconds){
           <circle class="rest-ring-bg" cx="100" cy="100" r="90"></circle>
           <circle class="rest-ring-fg" id="restRingFg" cx="100" cy="100" r="90" stroke-dasharray="${circumference}" stroke-dashoffset="0"></circle>
         </svg>
-        <div class="rest-time" id="restTimeLabel">${seconds}</div>
+        <div class="rest-time" id="restTimeLabel" role="button" tabindex="0" title="Toque pra editar">${seconds}</div>
       </div>
+      <p class="rest-edit-hint">Toque no número pra editar</p>
       <div class="rest-next">
         <span class="rest-next-label">${next.kind==='finish'?'':'A seguir'}</span>
         <div class="rest-next-name">${next.text}</div>
       </div>
       <div class="rest-actions">
-        <button class="btn btn-ghost" id="restAdd15">+15s</button>
+        <div class="rest-adjust-row">
+          <button class="btn btn-ghost" id="restMinus15">−15s</button>
+          <button class="btn btn-ghost" id="restAdd15">+15s</button>
+        </div>
         <button class="btn btn-primary hero-cta" id="restSkipBtn">Pular descanso</button>
       </div>
     </div>
@@ -1126,31 +1119,68 @@ function startRestOverlay(seconds){
   document.body.appendChild(overlay);
   requestAnimationFrame(()=>overlay.classList.add('open'));
 
-  const ring = overlay.querySelector('#restRingFg');
-  const label = overlay.querySelector('#restTimeLabel');
+  const timeBox = overlay.querySelector('.rest-ring');
 
-  RestTimer.start(seconds, (rem, total)=>{
+  function onTick(rem, total){
     const clamped = Math.max(0, rem);
-    label.textContent = clamped;
-    ring.style.strokeDashoffset = circumference * (1 - clamped/total);
-  }, ()=>{
-    label.textContent = '0';
+    const label = document.getElementById('restTimeLabel');
+    if(label) label.textContent = clamped;
+    const currentRing = document.getElementById('restRingFg');
+    if(currentRing) currentRing.style.strokeDashoffset = circumference * (1 - clamped/Math.max(total,1));
+  }
+  function onDone(){
+    const label = document.getElementById('restTimeLabel');
+    if(label) label.textContent = '0';
     showToast('Descanso finalizado', 'Hora de voltar para a próxima série!', '⏱');
     closeRestOverlay();
-  });
+  }
+  function restartAt(newSeconds){
+    newSeconds = Math.max(1, Math.round(newSeconds));
+    RestTimer.start(newSeconds, onTick, onDone);
+  }
+
+  RestTimer.start(seconds, onTick, onDone);
 
   overlay.querySelector('#restSkipBtn').addEventListener('click', closeRestOverlay);
-  overlay.querySelector('#restAdd15').addEventListener('click', ()=>{
-    RestTimer.start(RestTimer.getRemaining()+15, (rem,total)=>{
-      const clamped = Math.max(0, rem);
-      label.textContent = clamped;
-      ring.style.strokeDashoffset = circumference * (1 - clamped/total);
-    }, ()=>{
-      label.textContent = '0';
-      showToast('Descanso finalizado', 'Hora de voltar para a próxima série!', '⏱');
-      closeRestOverlay();
+  overlay.querySelector('#restAdd15').addEventListener('click', ()=>restartAt(RestTimer.getRemaining()+15));
+  overlay.querySelector('#restMinus15').addEventListener('click', ()=>restartAt(RestTimer.getRemaining()-15));
+
+  function enterEditMode(){
+    RestTimer.stop();
+    const current = RestTimer.getRemaining() || seconds;
+    timeBox.innerHTML = `
+      <svg viewBox="0 0 200 200">
+        <circle class="rest-ring-bg" cx="100" cy="100" r="90"></circle>
+        <circle class="rest-ring-fg" id="restRingFg" cx="100" cy="100" r="90" stroke-dasharray="${circumference}" stroke-dashoffset="0"></circle>
+      </svg>
+      <input type="number" id="restTimeInput" class="rest-time-input" min="5" step="5" value="${current}">
+    `;
+    const input = document.getElementById('restTimeInput');
+    input.focus();
+    input.select();
+    function commit(){
+      const val = Number(input.value);
+      restartAt(val>0 ? val : current);
+      rebuildRing();
+    }
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){ e.preventDefault(); input.blur(); }
     });
-  });
+  }
+
+  function rebuildRing(){
+    timeBox.innerHTML = `
+      <svg viewBox="0 0 200 200">
+        <circle class="rest-ring-bg" cx="100" cy="100" r="90"></circle>
+        <circle class="rest-ring-fg" id="restRingFg" cx="100" cy="100" r="90" stroke-dasharray="${circumference}" stroke-dashoffset="0"></circle>
+      </svg>
+      <div class="rest-time" id="restTimeLabel" role="button" tabindex="0" title="Toque pra editar">${RestTimer.getRemaining()}</div>
+    `;
+    timeBox.querySelector('#restTimeLabel').addEventListener('click', enterEditMode);
+  }
+
+  timeBox.querySelector('#restTimeLabel').addEventListener('click', enterEditMode);
 }
 
 function closeRestOverlay(){
@@ -1996,9 +2026,5 @@ function closeModal(){
 /* ======================================================================
    Utils
    ====================================================================== */
-function escapeHtml(str){
-  return String(str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-function capitalize(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
 
 document.addEventListener('DOMContentLoaded', boot);
