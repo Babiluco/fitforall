@@ -258,6 +258,45 @@ function nextWorkout(){
   return null;
 }
 
+/* Próximo treino agendado DEPOIS do que já aparece no card principal —
+   pra dar uma prévia do que vem a seguir, sem duplicar o que já é hero. */
+function upcomingAfterHero(nw){
+  const from = nw ? new Date(nw.date) : new Date();
+  for(let i=1;i<=7;i++){
+    const check = new Date(from); check.setDate(from.getDate()+i);
+    const planId = state.weekPlan[check.getDay()];
+    const tpl = getTemplate(planId);
+    if(tpl && tpl.id!=='descanso'){
+      return {template:tpl, date:check};
+    }
+  }
+  return null;
+}
+
+/* Maior carga recorde mais recente, entre todos os exercícios já registrados. */
+function latestPersonalRecord(){
+  let best = null;
+  Object.keys(state.exerciseLoads).forEach(exId=>{
+    const logs = [...state.exerciseLoads[exId]].sort((a,b)=>a.date.localeCompare(b.date));
+    logs.forEach((l,i)=>{
+      const prevMax = i===0 ? 0 : Math.max(...logs.slice(0,i).map(x=>x.weight));
+      if(l.weight>prevMax && (!best || l.date>best.date)){
+        const e = findExercise(exId);
+        best = {date:l.date, weight:l.weight, name: e?e.name:exId};
+      }
+    });
+  });
+  return best;
+}
+
+/* Estimativa de calorias pra um treino ainda não realizado, usando o mesmo
+   cálculo aplicado a sessões concluídas (volume*0.05 + minutos*4), só que
+   com o volume PLANEJADO do treino (séries×reps×carga) em vez do real. */
+function estimatedCalories(tpl){
+  const plannedVolume = tpl.exercises.reduce((sum,ex)=>sum + (ex.sets*ex.reps*(ex.load||0)), 0);
+  return Math.round(plannedVolume*0.05 + (tpl.estimatedTime||30)*4);
+}
+
 function lastLoadFor(exerciseId, beforeDate){
   const logs = state.exerciseLoads[exerciseId]||[];
   const prior = logs.filter(l=> !beforeDate || l.date < beforeDate);
@@ -429,6 +468,7 @@ function renderMiniGoals(){
 let currentTreinoTab = 'agenda';
 
 function renderTreino(){
+  agendaWeekOffset = 0;
   const wrap = document.getElementById('viewWrap');
   const tabs = [
     {id:'agenda', label:'Agenda'},
@@ -450,17 +490,20 @@ function renderTreino(){
   makeInteractiveElementsAccessible(document.getElementById('treinoTabContent'));
 }
 
+/* ======================================================================
+   AGENDA — cronograma semanal, com navegação entre semanas
+   ====================================================================== */
+let agendaWeekOffset = 0; // 0 = semana atual; -1 = anterior; +1 = próxima
+
 function renderAgenda(){
   const wrap = document.getElementById('treinoTabContent');
-  const start = startOfWeek(new Date());
-  wrap.innerHTML = `
-    <div class="week-grid" id="agendaGrid"></div>
-    <div class="section-title">Detalhes dos treinos</div>
-    <div id="agendaList"></div>
-  `;
-  const grid = document.getElementById('agendaGrid');
-  const list = document.getElementById('agendaList');
-  let gridHtml='', listHtml='';
+  const start = new Date(startOfWeek(new Date()).getTime() + agendaWeekOffset*7*86400000);
+  const end = new Date(start.getTime() + 6*86400000);
+  const isCurrentWeek = agendaWeekOffset===0;
+  const rangeLabel = `${start.getDate()} ${MONTH_SHORT[start.getMonth()]} – ${end.getDate()} ${MONTH_SHORT[end.getMonth()]}`;
+
+  let doneCount = 0, totalWorkoutDays = 0;
+  const days = [];
   for(let i=0;i<7;i++){
     const d = new Date(start); d.setDate(start.getDate()+i);
     const key = todayKey(d);
@@ -469,22 +512,50 @@ function renderAgenda(){
     const isToday = key===todayKey();
     const done = !!state.completedDates[key];
     const isRest = tpl.id==='descanso';
-    gridHtml += `<div class="day-card ${isToday?'today':''} ${done?'done':''} ${isRest?'rest':''}" data-day="${d.getDay()}" style="cursor:pointer;">
+    if(!isRest){ totalWorkoutDays++; if(done) doneCount++; }
+    days.push({d, key, tpl, isToday, done, isRest});
+  }
+  const weekComplete = isCurrentWeek && totalWorkoutDays>0 && doneCount===totalWorkoutDays;
+
+  wrap.innerHTML = `
+    <div class="agenda-week-nav">
+      <button class="icon-btn" id="agendaPrevWeek" aria-label="Semana anterior">${icon('chevron-left')}</button>
+      <div class="agenda-week-label">
+        <span>${isCurrentWeek?'Esta semana':rangeLabel}</span>
+        ${isCurrentWeek?`<span class="agenda-week-sub">${rangeLabel}</span>`:''}
+      </div>
+      <button class="icon-btn" id="agendaNextWeek" aria-label="Próxima semana">${icon('chevron-right')}</button>
+    </div>
+
+    ${weekComplete?`<div class="agenda-complete-banner">${icon('check',{size:16})} Semana completa! Todos os treinos feitos.</div>`:''}
+
+    <div class="week-grid" id="agendaGrid"></div>
+    <div class="section-title">Próximos passos</div>
+    <div id="agendaList"></div>
+  `;
+
+  const grid = document.getElementById('agendaGrid');
+  const list = document.getElementById('agendaList');
+  let gridHtml='', listHtml='';
+
+  days.forEach(({d,key,tpl,isToday,done,isRest})=>{
+    gridHtml += `<div class="day-card ${isToday?'today':''} ${done?'done':''} ${isRest?'rest':''}" data-day="${d.getDay()}" data-weekoffset="${agendaWeekOffset}" ${isRest?'':'style="cursor:pointer;"'} ${isToday?'aria-label="Hoje"':''}>
       <span class="day-name">${WEEKDAY_SHORT[d.getDay()]}</span>
-      <span class="day-status">${isRest?'💤':done?'✅':'⬜'}</span>
+      <span class="day-status">${isRest?icon('moon',{size:15}):done?icon('check',{size:15}):''}</span>
       <span class="day-workout">${isRest?'Descanso':tpl.name}</span>
     </div>`;
-    listHtml += `<div class="list-row" data-daydetail="${d.getDay()}" style="cursor:${isRest?'default':'pointer'};">
-      <div class="list-row-icon">${isRest?'💤':MUSCLE_ICONS[tpl.muscle]||'🏋️'}</div>
+    listHtml += `<div class="list-row ${isRest?'list-row-muted':''}" data-daydetail="${d.getDay()}" data-weekoffset="${agendaWeekOffset}" ${isRest?'':'style="cursor:pointer;"'}>
+      <div class="list-row-icon">${isRest?icon('moon',{size:18}):MUSCLE_ICONS[tpl.muscle]||'🏋️'}</div>
       <div class="list-row-body">
-        <div class="list-row-title">${WEEKDAY_NAMES[d.getDay()]} · ${tpl.name}</div>
+        <div class="list-row-title">${WEEKDAY_NAMES[d.getDay()]}${isToday?' · Hoje':''} · ${tpl.name}</div>
         <div class="list-row-sub">${isRest?'Dia de recuperação':`${tpl.estimatedTime} min · ${tpl.exercises.length} exercícios`}</div>
       </div>
-      <div>${isRest?'':done?'<span style="color:var(--green);font-weight:700;">✔ Feito</span>':'<span style="color:var(--text-dim);">→</span>'}</div>
+      <div class="list-row-trail">${isRest?'':done?`<span class="done-badge">${icon('check',{size:13})} Feito</span>`:icon('chevron-right',{size:16})}</div>
     </div>`;
-  }
+  });
   grid.innerHTML = gridHtml;
   list.innerHTML = listHtml;
+
   document.querySelectorAll('[data-day],[data-daydetail]').forEach(elm=>{
     elm.addEventListener('click', ()=>{
       const day = elm.dataset.day || elm.dataset.daydetail;
@@ -495,6 +566,9 @@ function renderAgenda(){
       openWorkoutDetail(tpl.id, todayKey(d));
     });
   });
+  document.getElementById('agendaPrevWeek').addEventListener('click', ()=>{ agendaWeekOffset--; renderAgenda(); });
+  document.getElementById('agendaNextWeek').addEventListener('click', ()=>{ agendaWeekOffset++; renderAgenda(); });
+  makeInteractiveElementsAccessible(wrap);
 }
 
 /* ======================================================================
