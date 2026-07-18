@@ -308,6 +308,7 @@ const PROGRAM_INFO = {
 
 const WEEKDAY_NAMES = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 const WEEKDAY_SHORT = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+const MONTH_SHORT = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 
 const ACHIEVEMENTS = [
   {id:'first_workout', emoji:'🏅', name:'Primeiro Treino', desc:'Complete seu 1º treino', check:s=>s.history.length>=1},
