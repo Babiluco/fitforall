@@ -409,7 +409,7 @@ main.view-wrap{
 /* Modal / overlay */
 .overlay{
   position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);
-  display:flex;align-items:flex-end;justify-content:center;z-index:100;
+  display:flex;align-items:flex-end;justify-content:center;z-index:250;
   opacity:0;pointer-events:none;transition:opacity .3s var(--ease);
 }
 .overlay.open{opacity:1;pointer-events:auto;}
@@ -485,11 +485,22 @@ main.view-wrap{
 .rest-ring circle{fill:none;stroke-width:10;}
 .rest-ring-bg{stroke:var(--border);}
 .rest-ring-fg{stroke:var(--blue);stroke-linecap:round;transition:stroke-dashoffset 1s linear;}
-.rest-time{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:52px;font-weight:800;}
+.rest-time{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:52px;font-weight:800;cursor:pointer;border-radius:50%;transition:background .2s;}
+.rest-time:hover,.rest-time:focus-visible{background:rgba(255,255,255,.05);}
+.rest-time-input{
+  position:absolute;inset:24px;width:calc(100% - 48px);height:calc(100% - 48px);
+  border-radius:50%;text-align:center;background:var(--bg-card);border:2px solid var(--accent);
+  font-family:var(--font-display);font-size:40px;font-weight:800;color:var(--text);
+  -moz-appearance:textfield;
+}
+.rest-time-input::-webkit-outer-spin-button,.rest-time-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.rest-edit-hint{font-size:11.5px;color:var(--text-faint);margin:-16px 0 20px;}
 .rest-next{margin-bottom:28px;min-height:40px;}
 .rest-next-label{font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;}
 .rest-next-name{font-size:18px;font-weight:800;margin-top:4px;line-height:1.3;}
 .rest-actions{display:flex;flex-direction:column;gap:12px;}
+.rest-adjust-row{display:flex;gap:12px;}
+.rest-adjust-row .btn{flex:1;}
 
 /* Completion celebration */
 .celebrate{
@@ -653,10 +664,82 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:20px 0;}
 
 <script>
 /* ==========================================================================
+   FitForAll — Configuração central
+   ==========================================================================
+   Responsabilidade: reunir num único lugar tudo que antes ficava espalhado
+   e "hardcoded" pelo código (nome/versão do app, ambiente, flags de debug,
+   endereço de API). Nenhum outro arquivo deve mais cravar esses valores
+   direto no meio do código — sempre referenciar CONFIG.*.
+
+   Hoje nada aqui conecta em lugar nenhum (API_URL é null, FEATURES estão
+   todas desligadas). É só a base pronta pra quando isso passar a existir.
+   ========================================================================== */
+const CONFIG = {
+  APP_NAME: 'FitForAll',
+  VERSION: '1.0.0',
+  ENV: 'production',        // 'development' | 'production'
+  DEBUG: false,              // true liga os logs de [FitForAll] no console (ver utils.js -> log())
+
+  API_URL: null,              // ainda não existe backend — fica null até existir
+  STORAGE_KEY: 'fittrack_state_v1', // chave do localStorage (mantida como estava, mudar apagaria dados salvos de quem já usa o app)
+
+  FEATURES: {
+    CLOUD_SYNC: false,        // sync.js já está pronto, mas fica desligado até existir backend
+    AUTH: false,               // auth.js já está pronto, mas fica desligado até existir backend
+  },
+};
+
+</script>
+<script>
+/* ==========================================================================
+   FitForAll — Funções utilitárias (puras, sem dependência de estado/tela)
+   ==========================================================================
+   Responsabilidade: funções pequenas e genéricas, usadas em vários pontos
+   do app, que não sabem nada sobre `state`, telas ou localStorage — só
+   recebem entrada e devolvem saída. Movidas pra cá de dentro do app.js e
+   do storage.js pra organizar o projeto em módulos, sem mudar o que elas
+   fazem.
+   ========================================================================== */
+
+function log(...args){
+  if(typeof CONFIG!=='undefined' && CONFIG.DEBUG) console.log('[FitForAll]', ...args);
+}
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function capitalize(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+
+function cryptoId(){
+  return 'id_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+}
+
+function todayKey(d){
+  const date = d || new Date();
+  return date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
+}
+
+function fmtDate(key){
+  const [y,m,d] = key.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function startOfWeek(d){
+  const date = new Date(d);
+  const day = date.getDay();
+  date.setDate(date.getDate()-day);
+  date.setHours(0,0,0,0);
+  return date;
+}
+
+</script>
+<script>
+/* ==========================================================================
    FitForAll — Persistência (LocalStorage)
    ========================================================================== */
 
-const STORAGE_KEY = 'fittrack_state_v1';
+const STORAGE_KEY = CONFIG.STORAGE_KEY;
 
 function defaultState(){
   return {
@@ -697,9 +780,7 @@ function defaultState(){
   };
 }
 
-function cryptoId(){
-  return 'id_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
-}
+
 
 function loadState(){
   try{
@@ -726,10 +807,6 @@ function saveState(state){
   }
 }
 
-function todayKey(d){
-  const date = d || new Date();
-  return date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
-}
 
 function computeStreak(completedDates){
   let streak = 0;
@@ -752,6 +829,205 @@ function computeStreak(completedDates){
   }
   return streak;
 }
+
+</script>
+<script>
+/* ==========================================================================
+   FitForAll — Camada de banco de dados (abstração sobre o localStorage)
+   ==========================================================================
+   Responsabilidade: ser o único ponto de leitura/escrita de dados do app,
+   com nomes de método que descrevem a AÇÃO (saveWorkout, loadProfile...),
+   não a tecnologia por trás. Hoje por baixo dos panos ainda é tudo
+   `state` + `persist()` (ver storage.js) — funcional de verdade, não é
+   simulação. O objetivo é que, no futuro, só esse arquivo precise mudar
+   pra trocar o localStorage por um backend real (ex: Supabase); as telas
+   não vão precisar saber a diferença.
+
+   IMPORTANTE: nesta primeira etapa o resto do app (app.js) continua
+   também podendo usar `state`/`persist()` direto, como sempre fez — nada
+   foi migrado à força pra cá ainda, pra não arriscar quebrar telas que já
+   funcionam. Este arquivo é a base pronta pra migração ser feita aos
+   poucos, função por função, quando fizer sentido.
+   ========================================================================== */
+
+const DB = {
+  /* ---- Treinos (sessões concluídas) -------------------------------- */
+  saveWorkout(session){
+    state.history.push(session);
+    persist();
+    return session;
+  },
+  deleteWorkout(sessionId){
+    state.history = state.history.filter(h=>h.id!==sessionId);
+    persist();
+  },
+  loadWorkouts(){
+    return state.history;
+  },
+
+  /* ---- Perfil -------------------------------------------------------- */
+  loadProfile(){
+    return state.user;
+  },
+  saveProfile(partialUser){
+    Object.assign(state.user, partialUser);
+    persist();
+    return state.user;
+  },
+
+  /* ---- Peso e medidas corporais --------------------------------------- */
+  saveWeight(weight, date){
+    state.weightLog.push({date: date || todayKey(), weight});
+    state.user.weight = weight;
+    persist();
+  },
+  loadWeightHistory(){
+    return state.weightLog;
+  },
+  saveMeasurements(entry){
+    state.measurements = state.measurements || [];
+    state.measurements.push(entry);
+    persist();
+    return entry;
+  },
+  loadMeasurements(){
+    return state.measurements || [];
+  },
+
+  /* ---- Treinos personalizados / exercícios ---------------------------- */
+  updateExercise(templateId, exercises){
+    // reaproveita a função que já existe em app.js pra não duplicar a
+    // lógica de override vs. treino próprio
+    persistTemplateExercises(templateId, exercises);
+  },
+  deleteWorkoutTemplate(templateId){
+    if(!isCustomTemplate(templateId)) return false;
+    delete state.customTemplates[templateId];
+    Object.keys(state.weekPlan).forEach(day=>{
+      if(state.weekPlan[day]===templateId) state.weekPlan[day]='descanso';
+    });
+    persist();
+    return true;
+  },
+
+  /* ---- Estatísticas ---------------------------------------------------- */
+  getStatistics(){
+    return {
+      streak: computeStreak(state.completedDates),
+      bestStreak: state.bestStreak||0,
+      totalWorkouts: state.history.length,
+      xp: state.xp||0,
+      level: levelFromXp(state.xp||0),
+    };
+  },
+};
+
+</script>
+<script>
+/* ==========================================================================
+   FitForAll — Camada de API (preparação para um backend futuro)
+   ==========================================================================
+   Responsabilidade: dar ao resto do app um jeito único e já-no-formato-certo
+   de falar com um servidor — mesmo não existindo nenhum servidor ainda.
+
+   Hoje NENHUM método aqui conecta em lugar nenhum. Todos devolvem uma
+   resposta simulada (mock), sempre de forma assíncrona (Promise), porque é
+   assim que uma chamada de rede real vai se comportar quando isso passar a
+   existir — então o código que for escrito contra API.get()/post() etc.
+   já vai funcionar sem precisar ser reescrito depois, só trocando o miolo
+   deste arquivo.
+   ========================================================================== */
+
+const API = {
+  async get(endpoint){
+    log(`[API mock] GET ${endpoint}`);
+    return {ok:true, data:null, mock:true};
+  },
+  async post(endpoint, body){
+    log(`[API mock] POST ${endpoint}`, body);
+    return {ok:true, data:body||null, mock:true};
+  },
+  async put(endpoint, body){
+    log(`[API mock] PUT ${endpoint}`, body);
+    return {ok:true, data:body||null, mock:true};
+  },
+  async delete(endpoint){
+    log(`[API mock] DELETE ${endpoint}`);
+    return {ok:true, data:null, mock:true};
+  },
+};
+
+</script>
+<script>
+/* ==========================================================================
+   FitForAll — Camada de autenticação (arquitetura pronta, login ainda não)
+   ==========================================================================
+   Responsabilidade: definir o "contrato" (nomes de método, formato de
+   retorno) que um sistema de login de verdade vai seguir no futuro — sem
+   implementar login nenhum agora. O app hoje não tem conceito de conta:
+   cada pessoa usa seu próprio navegador/celular, e os dados ficam só ali.
+
+   isLogged() devolve `true` de propósito: como não existe sessão real
+   ainda, o app trata "estar usando no aparelho" como equivalente a estar
+   "logado" localmente. Isso muda quando existir backend de verdade.
+   ========================================================================== */
+
+const AUTH = {
+  async login(email, password){
+    log('[Auth mock] login()', email);
+    return {ok:true, user:{id:'local-user', name: state.user.name, email: email||null}, mock:true};
+  },
+  async register(email, password, name){
+    log('[Auth mock] register()', email);
+    return {ok:true, user:{id:'local-user', name: name||state.user.name, email: email||null}, mock:true};
+  },
+  async logout(){
+    log('[Auth mock] logout()');
+    return {ok:true, mock:true};
+  },
+  isLogged(){
+    return true; // sem conceito de sessão real ainda — ver comentário acima
+  },
+  async refreshSession(){
+    log('[Auth mock] refreshSession()');
+    return {ok:true, mock:true};
+  },
+};
+
+</script>
+<script>
+/* ==========================================================================
+   FitForAll — Camada de sincronização (preparação para nuvem futura)
+   ==========================================================================
+   Responsabilidade: definir onde, no futuro, vai morar a lógica de mandar
+   os dados do aparelho pra um servidor (e trazer de volta). Hoje o app é
+   100% offline — tudo fica só no localStorage do navegador — então todo
+   método aqui é um "no-op" (não faz nada de verdade), só devolve uma
+   resposta simulada dizendo que não sincronizou.
+
+   Quando existir backend, essas funções passam a chamar API.* de verdade;
+   nada no resto do app precisa mudar, já que a "forma" da resposta é
+   a mesma desde já.
+   ========================================================================== */
+
+const SYNC = {
+  async syncProfile(){
+    log('[Sync mock] syncProfile — app ainda é 100% offline');
+    return {ok:true, synced:false, mock:true};
+  },
+  async syncWorkouts(){
+    log('[Sync mock] syncWorkouts');
+    return {ok:true, synced:false, mock:true};
+  },
+  async syncStatistics(){
+    log('[Sync mock] syncStatistics');
+    return {ok:true, synced:false, mock:true};
+  },
+  async syncMeasurements(){
+    log('[Sync mock] syncMeasurements');
+    return {ok:true, synced:false, mock:true};
+  },
+};
 
 </script>
 <script>
@@ -1494,13 +1770,6 @@ function weekProgress(){
   return {done, total};
 }
 
-function startOfWeek(d){
-  const date = new Date(d);
-  const day = date.getDay();
-  date.setDate(date.getDate()-day);
-  date.setHours(0,0,0,0);
-  return date;
-}
 
 function nextWorkout(){
   const d = new Date();
@@ -1527,10 +1796,6 @@ function bmi(){
   return (state.user.weight/(h*h)).toFixed(1);
 }
 
-function fmtDate(key){
-  const [y,m,d] = key.split('-');
-  return `${d}/${m}/${y}`;
-}
 
 /* ======================================================================
    VIEW: DASHBOARD
@@ -2361,14 +2626,18 @@ function startRestOverlay(seconds){
           <circle class="rest-ring-bg" cx="100" cy="100" r="90"></circle>
           <circle class="rest-ring-fg" id="restRingFg" cx="100" cy="100" r="90" stroke-dasharray="${circumference}" stroke-dashoffset="0"></circle>
         </svg>
-        <div class="rest-time" id="restTimeLabel">${seconds}</div>
+        <div class="rest-time" id="restTimeLabel" role="button" tabindex="0" title="Toque pra editar">${seconds}</div>
       </div>
+      <p class="rest-edit-hint">Toque no número pra editar</p>
       <div class="rest-next">
         <span class="rest-next-label">${next.kind==='finish'?'':'A seguir'}</span>
         <div class="rest-next-name">${next.text}</div>
       </div>
       <div class="rest-actions">
-        <button class="btn btn-ghost" id="restAdd15">+15s</button>
+        <div class="rest-adjust-row">
+          <button class="btn btn-ghost" id="restMinus15">−15s</button>
+          <button class="btn btn-ghost" id="restAdd15">+15s</button>
+        </div>
         <button class="btn btn-primary hero-cta" id="restSkipBtn">Pular descanso</button>
       </div>
     </div>
@@ -2376,31 +2645,68 @@ function startRestOverlay(seconds){
   document.body.appendChild(overlay);
   requestAnimationFrame(()=>overlay.classList.add('open'));
 
-  const ring = overlay.querySelector('#restRingFg');
-  const label = overlay.querySelector('#restTimeLabel');
+  const timeBox = overlay.querySelector('.rest-ring');
 
-  RestTimer.start(seconds, (rem, total)=>{
+  function onTick(rem, total){
     const clamped = Math.max(0, rem);
-    label.textContent = clamped;
-    ring.style.strokeDashoffset = circumference * (1 - clamped/total);
-  }, ()=>{
-    label.textContent = '0';
+    const label = document.getElementById('restTimeLabel');
+    if(label) label.textContent = clamped;
+    const currentRing = document.getElementById('restRingFg');
+    if(currentRing) currentRing.style.strokeDashoffset = circumference * (1 - clamped/Math.max(total,1));
+  }
+  function onDone(){
+    const label = document.getElementById('restTimeLabel');
+    if(label) label.textContent = '0';
     showToast('Descanso finalizado', 'Hora de voltar para a próxima série!', '⏱');
     closeRestOverlay();
-  });
+  }
+  function restartAt(newSeconds){
+    newSeconds = Math.max(1, Math.round(newSeconds));
+    RestTimer.start(newSeconds, onTick, onDone);
+  }
+
+  RestTimer.start(seconds, onTick, onDone);
 
   overlay.querySelector('#restSkipBtn').addEventListener('click', closeRestOverlay);
-  overlay.querySelector('#restAdd15').addEventListener('click', ()=>{
-    RestTimer.start(RestTimer.getRemaining()+15, (rem,total)=>{
-      const clamped = Math.max(0, rem);
-      label.textContent = clamped;
-      ring.style.strokeDashoffset = circumference * (1 - clamped/total);
-    }, ()=>{
-      label.textContent = '0';
-      showToast('Descanso finalizado', 'Hora de voltar para a próxima série!', '⏱');
-      closeRestOverlay();
+  overlay.querySelector('#restAdd15').addEventListener('click', ()=>restartAt(RestTimer.getRemaining()+15));
+  overlay.querySelector('#restMinus15').addEventListener('click', ()=>restartAt(RestTimer.getRemaining()-15));
+
+  function enterEditMode(){
+    RestTimer.stop();
+    const current = RestTimer.getRemaining() || seconds;
+    timeBox.innerHTML = `
+      <svg viewBox="0 0 200 200">
+        <circle class="rest-ring-bg" cx="100" cy="100" r="90"></circle>
+        <circle class="rest-ring-fg" id="restRingFg" cx="100" cy="100" r="90" stroke-dasharray="${circumference}" stroke-dashoffset="0"></circle>
+      </svg>
+      <input type="number" id="restTimeInput" class="rest-time-input" min="5" step="5" value="${current}">
+    `;
+    const input = document.getElementById('restTimeInput');
+    input.focus();
+    input.select();
+    function commit(){
+      const val = Number(input.value);
+      restartAt(val>0 ? val : current);
+      rebuildRing();
+    }
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){ e.preventDefault(); input.blur(); }
     });
-  });
+  }
+
+  function rebuildRing(){
+    timeBox.innerHTML = `
+      <svg viewBox="0 0 200 200">
+        <circle class="rest-ring-bg" cx="100" cy="100" r="90"></circle>
+        <circle class="rest-ring-fg" id="restRingFg" cx="100" cy="100" r="90" stroke-dasharray="${circumference}" stroke-dashoffset="0"></circle>
+      </svg>
+      <div class="rest-time" id="restTimeLabel" role="button" tabindex="0" title="Toque pra editar">${RestTimer.getRemaining()}</div>
+    `;
+    timeBox.querySelector('#restTimeLabel').addEventListener('click', enterEditMode);
+  }
+
+  timeBox.querySelector('#restTimeLabel').addEventListener('click', enterEditMode);
 }
 
 function closeRestOverlay(){
@@ -3246,10 +3552,6 @@ function closeModal(){
 /* ======================================================================
    Utils
    ====================================================================== */
-function escapeHtml(str){
-  return String(str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-function capitalize(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
 
 document.addEventListener('DOMContentLoaded', boot);
 
