@@ -340,6 +340,22 @@ main.view-wrap{
 .day-name{font-size:11px;color:var(--text-dim);font-weight:700;text-transform:uppercase;}
 .day-status{font-size:20px;}
 .day-workout{font-size:10.5px;color:var(--text-dim);line-height:1.3;min-height:26px;}
+.day-status svg{display:inline-block;}
+.day-card.done .day-status{color:var(--green);}
+.day-card.rest .day-status{color:var(--text-faint);}
+
+.agenda-week-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.agenda-week-label{text-align:center;display:flex;flex-direction:column;}
+.agenda-week-label span:first-child{font-weight:700;font-size:15px;}
+.agenda-week-sub{font-size:12px;color:var(--text-dim);}
+.agenda-complete-banner{
+  display:flex;align-items:center;gap:8px;justify-content:center;
+  background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.3);
+  border-radius:var(--radius);padding:10px 14px;font-size:13px;font-weight:700;margin-bottom:16px;
+}
+.list-row-muted{opacity:.6;}
+.list-row-trail{flex-shrink:0;color:var(--text-dim);display:flex;align-items:center;}
+.done-badge{display:flex;align-items:center;gap:5px;color:var(--green);font-weight:700;font-size:12.5px;}
 
 /* List rows */
 .list-row{
