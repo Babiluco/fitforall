@@ -1042,13 +1042,21 @@ function openRunner(templateId, dateKey, mood){
     templateId, dateKey, mood,
     exIndex:0,
     startTime:Date.now(),
+    lastCompleted:null, // {exIndex,setIndex} — pra permitir desfazer a última série marcada
     sets: tpl.exercises.map(ex=>{
       const n = ex.sets||1;
+      // Sugestão de carga: usa o último peso registrado desse exercício
+      // (histórico real), caindo pro valor planejado no treino só se não
+      // houver histórico ainda. Calculado uma única vez aqui, não a cada
+      // render.
+      const history = state.exerciseLoads[ex.exerciseId]||[];
+      const baseLoad = history.length ? history[history.length-1].weight : (ex.load||0);
       return Array.from({length:n}, ()=>({
-        weight: ex.load ? Math.round(ex.load*loadMultiplier) : 0,
+        weight: baseLoad ? Math.round(baseLoad*loadMultiplier) : 0,
         reps: ex.reps||0,
         notes:'',
         done:false,
+        skipped:false,
       }));
     }),
   };
@@ -1057,6 +1065,33 @@ function openRunner(templateId, dateKey, mood){
   el.innerHTML = `<div class="runner" id="runnerEl"></div>`;
   requestAnimationFrame(()=>document.getElementById('runnerEl').classList.add('open'));
   renderRunnerExercise();
+  startRunnerClock();
+}
+
+/* Relógio do treino: atualiza só o texto do cabeçalho a cada segundo, sem
+   re-renderizar a tela inteira — evita trabalho desnecessário enquanto a
+   pessoa está no meio de uma série. */
+function startRunnerClock(){
+  stopRunnerClock();
+  updateRunnerClock();
+  runnerCtx.clockInterval = setInterval(updateRunnerClock, 1000);
+}
+function stopRunnerClock(){
+  if(runnerCtx && runnerCtx.clockInterval){ clearInterval(runnerCtx.clockInterval); runnerCtx.clockInterval=null; }
+}
+function updateRunnerClock(){
+  if(!runnerCtx) return;
+  const elapsedEl = document.getElementById('runnerElapsed');
+  const remainingEl = document.getElementById('runnerRemaining');
+  if(!elapsedEl && !remainingEl) return;
+  const elapsedMin = (Date.now()-runnerCtx.startTime)/60000;
+  const mm = Math.floor(elapsedMin), ss = Math.floor((elapsedMin-mm)*60);
+  if(elapsedEl) elapsedEl.textContent = `${mm}:${String(ss).padStart(2,'0')}`;
+  if(remainingEl){
+    const tpl = getTemplate(runnerCtx.templateId);
+    const remain = Math.max(0, Math.round((tpl.estimatedTime||30) - elapsedMin));
+    remainingEl.textContent = `~${remain} min restantes`;
+  }
 }
 
 function closeRunner(){
@@ -1064,6 +1099,7 @@ function closeRunner(){
   if(el){ el.classList.remove('open'); setTimeout(()=>{ const root=document.getElementById('runnerRoot'); if(root) root.innerHTML=''; },350); }
   RestTimer.stop();
   removeTimerFab();
+  stopRunnerClock();
   const overlay = document.getElementById('restOverlay');
   if(overlay) overlay.remove();
   runnerCtx = null;
@@ -1077,29 +1113,40 @@ function renderRunnerExercise(){
   const e = findExercise(exDef.exerciseId);
   const setsArr = runnerCtx.sets[runnerCtx.exIndex];
   const last = lastLoadFor(exDef.exerciseId, todayKey());
-  const allDone = setsArr.every(s=>s.done);
+  const allDone = setsArr.every(s=>s.done || s.skipped);
   const isLast = runnerCtx.exIndex === tpl.exercises.length-1;
+  const doneCount = setsArr.filter(s=>s.done).length;
+  const progressPct = ((runnerCtx.exIndex + (setsArr.length?doneCount/setsArr.length:0)) / tpl.exercises.length) * 100;
 
   runnerEl.innerHTML = `
     <div class="runner-header">
       <button class="icon-btn" id="runnerClose" aria-label="Fechar treino">${icon('x')}</button>
-      <div style="font-weight:700;font-size:13px;color:var(--text-dim);">${runnerCtx.exIndex+1} / ${tpl.exercises.length}</div>
+      <div class="runner-header-mid">
+        <div class="runner-counter">${runnerCtx.exIndex+1} / ${tpl.exercises.length}</div>
+        <div class="runner-clock"><span id="runnerElapsed">0:00</span> · <span id="runnerRemaining">~${tpl.estimatedTime||30} min restantes</span></div>
+      </div>
       <button class="icon-btn" id="runnerRestBtn" aria-label="Cronômetro de descanso">${icon('clock')}</button>
     </div>
-    <div class="runner-body">
-      <div class="progress-track" style="max-width:400px;margin-bottom:20px;"><div class="progress-fill thin" style="width:${((runnerCtx.exIndex)/tpl.exercises.length*100)}%"></div></div>
-      <div class="runner-exercise-media">${MUSCLE_ICONS[e.muscle]||'🏋️'}</div>
+    <div class="runner-body" id="runnerScrollArea">
+      <div class="progress-track" style="max-width:400px;margin-bottom:20px;" role="progressbar" aria-valuenow="${Math.round(progressPct)}" aria-valuemin="0" aria-valuemax="100" aria-label="Progresso do treino"><div class="progress-fill thin" style="width:${progressPct}%"></div></div>
+      <div class="runner-exercise-media ${allDone?'complete':''}" id="runnerMedia">${MUSCLE_ICONS[e.muscle]||'🏋️'}</div>
       <div class="runner-title">${e.name}</div>
       <div class="runner-muscle">${capitalize(e.muscle)} · ${exDef.sets} séries × ${exDef.reps} reps · ⏱ ${exDef.rest||60}s descanso</div>
-      ${last ? `<div class="rest-compare">Semana passada: <b>${last.weight}kg</b> · Hoje sugerido: <b>${exDef.load||0}kg</b></div>` : ''}
+      ${last ? `<div class="rest-compare">Última vez: <b>${last.weight}kg</b> · Sugestão de hoje: <b>${setsArr[0]?.weight||0}kg</b></div>` : ''}
 
       <div class="set-tracker" id="setTracker">
         ${setsArr.map((s,i)=>`
-          <div class="set-row ${s.done?'done':''}" data-set="${i}">
+          <div class="set-row ${s.done?'done':''} ${s.skipped?'skipped':''}" data-set="${i}">
             <div class="set-num">${i+1}</div>
-            <div class="set-field"><label>Kg</label><input type="number" min="0" step="0.5" value="${s.weight}" data-field="weight" data-set="${i}"></div>
-            <div class="set-field"><label>Reps</label><input type="number" min="0" value="${s.reps}" data-field="reps" data-set="${i}"></div>
-            <button class="set-check" data-check="${i}">${s.done?'✓':''}</button>
+            ${s.skipped ? `
+              <div class="set-skipped-label">Série pulada</div>
+              <button class="btn btn-ghost btn-sm" data-unskip="${i}">Reverter</button>
+            ` : `
+              <div class="set-field"><label>Kg</label><input type="number" min="0" step="0.5" value="${s.weight}" data-field="weight" data-set="${i}" aria-label="Carga da série ${i+1}"></div>
+              <div class="set-field"><label>Reps</label><input type="number" min="0" value="${s.reps}" data-field="reps" data-set="${i}" aria-label="Repetições da série ${i+1}"></div>
+              <button class="icon-btn set-skip-btn" data-skip="${i}" aria-label="Pular série ${i+1}" title="Pular série">${icon('x',{size:14})}</button>
+              <button class="set-check" data-check="${i}" aria-label="${s.done?'Desmarcar':'Marcar'} série ${i+1} como concluída">${s.done?icon('check',{size:18}):''}</button>
+            `}
           </div>
         `).join('')}
       </div>
@@ -1130,8 +1177,24 @@ function renderRunnerExercise(){
       const i = Number(btn.dataset.check);
       setsArr[i].done = !setsArr[i].done;
       if(setsArr[i].done){
+        runnerCtx.lastCompleted = {exIndex:runnerCtx.exIndex, setIndex:i};
         openRestTimerPicker(exDef.rest||60, true);
       }
+      renderRunnerExercise();
+    });
+  });
+  runnerEl.querySelectorAll('[data-skip]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const i = Number(btn.dataset.skip);
+      setsArr[i].skipped = true;
+      setsArr[i].done = false;
+      renderRunnerExercise();
+    });
+  });
+  runnerEl.querySelectorAll('[data-unskip]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const i = Number(btn.dataset.unskip);
+      setsArr[i].skipped = false;
       renderRunnerExercise();
     });
   });
@@ -1139,6 +1202,8 @@ function renderRunnerExercise(){
   if(nextBtn) nextBtn.addEventListener('click', goToNextExercise);
   const finishBtn = document.getElementById('finishWorkoutBtn');
   if(finishBtn) finishBtn.addEventListener('click', finishWorkout);
+
+  updateRunnerClock();
 }
 
 function goToNextExercise(){
@@ -1146,6 +1211,8 @@ function goToNextExercise(){
   if(runnerCtx.exIndex < tpl.exercises.length-1){
     runnerCtx.exIndex++;
     renderRunnerExercise();
+    const scrollArea = document.getElementById('runnerScrollArea');
+    if(scrollArea) scrollArea.scrollTop = 0;
   } else {
     finishWorkout();
   }
@@ -1187,9 +1254,21 @@ function openRestTimerPicker(defaultSeconds, autoStart){
   }
 }
 
+const REST_MOTIVATION = [
+  'Respira fundo. A próxima série te espera.',
+  'Você já está mais forte que na última série.',
+  'Hidrata e prepara — quase lá.',
+  'Cada segundo de descanso também é treino.',
+  'Foco no que vem a seguir.',
+  'Consistência vence intensidade.',
+];
+
 function startRestOverlay(seconds){
   removeTimerFab();
   const next = getRestNextLabel();
+  const showMotivation = Math.random()<0.5;
+  const motivation = REST_MOTIVATION[Math.floor(Math.random()*REST_MOTIVATION.length)];
+  const canUndo = !!runnerCtx.lastCompleted;
   const circumference = 2*Math.PI*90;
   const overlay = document.createElement('div');
   overlay.className = 'rest-overlay';
@@ -1209,12 +1288,15 @@ function startRestOverlay(seconds){
         <span class="rest-next-label">${next.kind==='finish'?'':'A seguir'}</span>
         <div class="rest-next-name">${next.text}</div>
       </div>
+      ${showMotivation?`<p class="rest-motivation">${motivation}</p>`:''}
       <div class="rest-actions">
         <div class="rest-adjust-row">
-          <button class="btn btn-ghost" id="restMinus15">−15s</button>
-          <button class="btn btn-ghost" id="restAdd15">+15s</button>
+          <button class="btn btn-ghost" id="restMinus15" aria-label="Tirar 15 segundos">−15s</button>
+          <button class="btn btn-ghost" id="restPauseBtn" aria-label="Pausar cronômetro">${icon('clock',{size:16})}</button>
+          <button class="btn btn-ghost" id="restAdd15" aria-label="Adicionar 15 segundos">+15s</button>
         </div>
         <button class="btn btn-primary hero-cta" id="restSkipBtn">Pular descanso</button>
+        ${canUndo?`<button class="btn btn-ghost btn-sm" id="restUndoBtn">Desfazer última série</button>`:''}
       </div>
     </div>
   `;
@@ -1246,6 +1328,24 @@ function startRestOverlay(seconds){
   overlay.querySelector('#restSkipBtn').addEventListener('click', closeRestOverlay);
   overlay.querySelector('#restAdd15').addEventListener('click', ()=>restartAt(RestTimer.getRemaining()+15));
   overlay.querySelector('#restMinus15').addEventListener('click', ()=>restartAt(RestTimer.getRemaining()-15));
+
+  const pauseBtn = overlay.querySelector('#restPauseBtn');
+  pauseBtn.addEventListener('click', ()=>{
+    if(RestTimer.isRunning()){
+      RestTimer.pause();
+      pauseBtn.innerHTML = icon('check',{size:16}); // reaproveita um ícone claro de "retomar"
+      pauseBtn.setAttribute('aria-label','Retomar cronômetro');
+      overlay.classList.add('paused');
+    } else {
+      RestTimer.resume();
+      pauseBtn.innerHTML = icon('clock',{size:16});
+      pauseBtn.setAttribute('aria-label','Pausar cronômetro');
+      overlay.classList.remove('paused');
+    }
+  });
+
+  const undoBtn = overlay.querySelector('#restUndoBtn');
+  if(undoBtn) undoBtn.addEventListener('click', undoLastSet);
 
   function enterEditMode(){
     RestTimer.stop();
@@ -1285,6 +1385,18 @@ function startRestOverlay(seconds){
   timeBox.querySelector('#restTimeLabel').addEventListener('click', enterEditMode);
 }
 
+function undoLastSet(){
+  if(!runnerCtx || !runnerCtx.lastCompleted) return;
+  const {exIndex, setIndex} = runnerCtx.lastCompleted;
+  if(runnerCtx.sets[exIndex] && runnerCtx.sets[exIndex][setIndex]){
+    runnerCtx.sets[exIndex][setIndex].done = false;
+  }
+  runnerCtx.lastCompleted = null;
+  closeRestOverlay();
+  if(exIndex===runnerCtx.exIndex) renderRunnerExercise();
+  showToast('Série desfeita', 'Marcada como não concluída novamente.', '↩️');
+}
+
 function closeRestOverlay(){
   RestTimer.stop();
   const overlay = document.getElementById('restOverlay');
@@ -1300,14 +1412,16 @@ function removeTimerFab(){
 }
 
 function finishWorkout(){
+  stopRunnerClock();
   const tpl = getTemplate(runnerCtx.templateId);
   const durationMin = Math.max(1, Math.round((Date.now()-runnerCtx.startTime)/60000));
-  let volume = 0;
+  let volume = 0, setsCompleted = 0;
   const exercisesLog = tpl.exercises.map((exDef,i)=>{
-    const sets = runnerCtx.sets[i].map(s=>({weight:s.weight, reps:s.reps, notes:s.notes, done:s.done}));
-    sets.forEach(s=>{ if(s.done) volume += (s.weight*s.reps); });
+    const sets = runnerCtx.sets[i].map(s=>({weight:s.weight, reps:s.reps, notes:s.notes, done:s.done, skipped:s.skipped}));
+    sets.forEach(s=>{ if(s.done){ volume += (s.weight*s.reps); setsCompleted++; } });
     return {exerciseId:exDef.exerciseId, sets};
   });
+  const exercisesCompleted = exercisesLog.filter(el=>el.sets.some(s=>s.done)).length;
   const calories = Math.round(volume*0.05 + durationMin*4);
   const session = {
     id:cryptoId(), templateId:runnerCtx.templateId, name:tpl.name,
@@ -1345,13 +1459,22 @@ function finishWorkout(){
   if(newRecord) pushNotification('Novo recorde! 🎉', 'Você superou sua carga anterior em um exercício.', '🏆');
   if(isNewStreakRecord) pushNotification('Novo recorde de sequência!', `${state.streak} dias treinando seguidos.`, '🔥');
 
-  showCompletionScreen(session, {xp:50, newRecord, isNewStreakRecord});
+  showCompletionScreen(session, {xp:50, newRecord, isNewStreakRecord, setsCompleted, exercisesCompleted, totalExercises:tpl.exercises.length});
 }
+
+const FINISH_MOTIVATION = [
+  'Mais um passo na direção certa.',
+  'Consistência é o que constrói resultado.',
+  'Seu eu do futuro agradece esse treino.',
+  'Descansa bem — você mereceu.',
+  'Todo treino conta, inclusive esse.',
+];
 
 function weekProgressAfterSave(){ return weekProgress(); }
 
 function showCompletionScreen(session, extra){
   extra = extra || {};
+  const motivation = FINISH_MOTIVATION[Math.floor(Math.random()*FINISH_MOTIVATION.length)];
   const runnerEl = document.getElementById('runnerEl');
   runnerEl.innerHTML = `
     <div class="runner-body" style="justify-content:center;flex:1;">
@@ -1364,9 +1487,15 @@ function showCompletionScreen(session, extra){
           <div><b>${session.volume}kg</b><span>Volume</span></div>
           <div><b>${session.calories}</b><span>Kcal</span></div>
         </div>
+        <div class="celebrate-stats">
+          <div><b>${extra.exercisesCompleted||0}/${extra.totalExercises||0}</b><span>Exercícios</span></div>
+          <div><b>${extra.setsCompleted||0}</b><span>Séries</span></div>
+          <div><b>🔥 ${state.streak}</b><span>Sequência</span></div>
+        </div>
         <div class="xp-earned">+${extra.xp||0} XP</div>
         ${extra.isNewStreakRecord?`<p class="celebrate-extra">🔥 Novo recorde de sequência: ${state.streak} dias!</p>`:''}
         ${extra.newRecord?`<p class="celebrate-extra">🏆 Novo recorde de carga em algum exercício!</p>`:''}
+        <p class="celebrate-motivation">${motivation}</p>
         <button class="btn btn-primary btn-block" id="closeCelebrate">Concluir</button>
       </div>
     </div>
