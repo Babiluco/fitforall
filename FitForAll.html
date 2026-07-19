@@ -189,7 +189,7 @@ main.view-wrap{
 @media (max-width: 880px){
   .sidebar{display:none;}
   .mobile-nav{display:flex;}
-  main.view-wrap{padding:18px 16px 90px;max-width:100%;}
+  main.view-wrap{padding:22px 18px 90px;max-width:100%;}
 }
 
 /* ==========================================================================
@@ -197,7 +197,7 @@ main.view-wrap{
    ========================================================================== */
 .view-header{
   display:flex;justify-content:space-between;align-items:flex-start;
-  margin-bottom:22px;flex-wrap:wrap;gap:12px;
+  margin-bottom:26px;flex-wrap:wrap;gap:12px;
 }
 .greeting h1{font-size:26px;font-weight:800;}
 .greeting p{color:var(--text-dim);font-size:14px;margin-top:4px;}
@@ -247,7 +247,7 @@ main.view-wrap{
 
 /* Hero card — dominant "what should I do now" CTA on the Home screen */
 .hero-card{
-  position:relative;overflow:hidden;padding:22px;
+  position:relative;overflow:hidden;padding:26px;margin-bottom:20px;
   background:linear-gradient(155deg, var(--bg-card) 0%, var(--bg-card) 55%, rgba(51,85,255,.16) 100%);
 }
 .hero-card::before{
@@ -256,21 +256,34 @@ main.view-wrap{
 }
 .hero-eyebrow{
   font-size:11.5px;font-weight:700;color:var(--purple);text-transform:uppercase;
-  letter-spacing:.06em;margin-bottom:8px;
+  letter-spacing:.06em;margin-bottom:14px;
 }
-.hero-meta{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12.5px;color:var(--text-dim);}
-.hero-meta span{display:inline-flex;align-items:center;gap:5px;}
-.hero-cta{width:100%;padding:17px 24px;font-size:15.5px;margin-top:20px;position:relative;}
+.hero-meta{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;font-size:12.5px;color:var(--text-dim);}
+.hero-meta span{display:inline-flex;align-items:center;gap:6px;}
+.hero-cta{width:100%;padding:17px 24px;font-size:15.5px;margin-top:26px;position:relative;}
 
 /* Condensed progress strip — secondary to the hero CTA */
-.progress-strip{display:flex;gap:10px;overflow-x:auto;padding-bottom:2px;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
-.progress-strip::-webkit-scrollbar{display:none;}
-.progress-chip{
-  flex:0 0 auto;min-width:112px;background:var(--bg-card);border:1px solid var(--border);
-  border-radius:var(--radius);padding:12px 14px;display:flex;flex-direction:column;gap:4px;
+/* Seções recolhíveis do Dashboard — <details> nativo: já vem com
+   navegação por teclado e anúncio de expandido/recolhido pro leitor de
+   tela, sem precisar de JS extra pra isso. */
+.dash-section{
+  background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);
+  margin-bottom:16px;overflow:hidden;
 }
-.progress-chip .stat-label{font-size:10.5px;color:var(--text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.03em;}
-.progress-chip .stat-value{font-family:var(--font-display);font-size:19px;font-weight:800;}
+.dash-section summary{
+  list-style:none;cursor:pointer;padding:18px 20px;display:flex;
+  align-items:center;justify-content:space-between;gap:14px;
+}
+.dash-section summary::-webkit-details-marker{display:none;}
+.dash-section summary::after{
+  content:'';width:9px;height:9px;border-right:2px solid var(--text-dim);border-bottom:2px solid var(--text-dim);
+  transform:rotate(-45deg);flex-shrink:0;transition:transform .2s var(--ease);
+}
+.dash-section[open] summary::after{transform:rotate(45deg);}
+.dash-section-title{font-weight:700;font-size:14.5px;}
+.dash-section-glance{font-size:12.5px;color:var(--text-dim);flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dash-section-body{padding:4px 20px 20px;}
+.dash-section-body .section-title{margin-top:22px;}
 
 /* Compact preview rows (recent history / latest achievement) */
 .mini-preview-row{display:flex;align-items:center;gap:12px;}
@@ -1804,6 +1817,45 @@ function nextWorkout(){
   return null;
 }
 
+/* Próximo treino agendado DEPOIS do que já aparece no card principal —
+   pra dar uma prévia do que vem a seguir, sem duplicar o que já é hero. */
+function upcomingAfterHero(nw){
+  const from = nw ? new Date(nw.date) : new Date();
+  for(let i=1;i<=7;i++){
+    const check = new Date(from); check.setDate(from.getDate()+i);
+    const planId = state.weekPlan[check.getDay()];
+    const tpl = getTemplate(planId);
+    if(tpl && tpl.id!=='descanso'){
+      return {template:tpl, date:check};
+    }
+  }
+  return null;
+}
+
+/* Maior carga recorde mais recente, entre todos os exercícios já registrados. */
+function latestPersonalRecord(){
+  let best = null;
+  Object.keys(state.exerciseLoads).forEach(exId=>{
+    const logs = [...state.exerciseLoads[exId]].sort((a,b)=>a.date.localeCompare(b.date));
+    logs.forEach((l,i)=>{
+      const prevMax = i===0 ? 0 : Math.max(...logs.slice(0,i).map(x=>x.weight));
+      if(l.weight>prevMax && (!best || l.date>best.date)){
+        const e = findExercise(exId);
+        best = {date:l.date, weight:l.weight, name: e?e.name:exId};
+      }
+    });
+  });
+  return best;
+}
+
+/* Estimativa de calorias pra um treino ainda não realizado, usando o mesmo
+   cálculo aplicado a sessões concluídas (volume*0.05 + minutos*4), só que
+   com o volume PLANEJADO do treino (séries×reps×carga) em vez do real. */
+function estimatedCalories(tpl){
+  const plannedVolume = tpl.exercises.reduce((sum,ex)=>sum + (ex.sets*ex.reps*(ex.load||0)), 0);
+  return Math.round(plannedVolume*0.05 + (tpl.estimatedTime||30)*4);
+}
+
 function lastLoadFor(exerciseId, beforeDate){
   const logs = state.exerciseLoads[exerciseId]||[];
   const prior = logs.filter(l=> !beforeDate || l.date < beforeDate);
@@ -1831,6 +1883,11 @@ function renderDashboard(){
   const lastSession = [...state.history].sort((a,b)=>b.date.localeCompare(a.date))[0];
   const lastAchievement = [...state.unlockedAchievements].reverse().map(id=>ACHIEVEMENTS.find(a=>a.id===id)).find(Boolean);
   const nextAchievement = ACHIEVEMENTS.find(a=>!state.unlockedAchievements.includes(a.id));
+  const upcoming = upcomingAfterHero(nw);
+  const pr = latestPersonalRecord();
+  const lastWeight = [...(state.weightLog||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+  const goalsTotal = state.goals.length;
+  const goalsDone = state.goals.filter(g=>g.done).length;
 
   wrap.innerHTML = `
     <div class="view-header">
@@ -1846,13 +1903,14 @@ function renderDashboard(){
     <div class="card hero-card ${nw?'interactive':''}" id="nextWorkoutCard" ${nw?'style="cursor:pointer;"':''}>
       ${nw ? `
         <div class="hero-eyebrow">${nw.isToday?'Treino de hoje':WEEKDAY_NAMES[nw.date.getDay()]}</div>
-        <div style="display:flex;align-items:center;gap:14px;">
+        <div style="display:flex;align-items:center;gap:16px;">
           <div class="list-row-icon" style="width:56px;height:56px;font-size:24px;flex-shrink:0;">${MUSCLE_ICONS[nw.template.muscle]||'🏋️'}</div>
           <div style="min-width:0;">
             <div style="font-weight:800;font-size:19px;">${nw.template.name}</div>
             <div class="hero-meta">
               <span>⏱️ ${nw.template.estimatedTime} min</span>
               <span>🏋️ ${nw.template.exercises.length} exercícios</span>
+              <span>🔥 ~${estimatedCalories(nw.template)} kcal</span>
             </div>
           </div>
         </div>
@@ -1860,52 +1918,97 @@ function renderDashboard(){
       ` : `<div class="empty-state"><span class="emoji">🎉</span>Você concluiu todos os treinos da semana! Aproveite pra descansar.</div>`}
     </div>
 
-    <div class="section-title">Resumo da semana <span class="link" data-nav="agenda">ver agenda</span></div>
-    <div id="miniWeek"></div>
-
-    <div class="section-title">Objetivos de hoje <span class="link" data-nav="profile" data-navtab="metas">ver todas</span></div>
-    <div id="miniGoals"></div>
-
-    <div class="section-title">Seu progresso <span class="link" data-nav="stats">ver estatísticas</span></div>
-    <div class="progress-strip">
-      <div class="progress-chip"><span class="stat-label">Treinos/semana</span><span class="stat-value">${wp.done}<span style="font-size:13px;color:var(--text-dim);"> /${wp.total}</span></span></div>
-      <div class="progress-chip"><span class="stat-label">Sequência</span><span class="stat-value">🔥 ${streak}</span></div>
-      <div class="progress-chip"><span class="stat-label">Peso atual</span><span class="stat-value">${state.user.weight}<span style="font-size:13px;color:var(--text-dim);">kg</span></span></div>
-      <div class="progress-chip"><span class="stat-label">IMC</span><span class="stat-value">${bmi()}</span></div>
-    </div>
-
-    <div class="section-title">Histórico recente <span class="link" data-nav="history">ver tudo</span></div>
-    ${lastSession ? `
-      <div class="card interactive mini-preview-row" data-nav="history" style="cursor:pointer;">
-        <div class="list-row-icon">${MUSCLE_ICONS[getTemplate(lastSession.templateId)?.muscle]||'🏋️'}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-weight:700;font-size:14px;">${lastSession.name}</div>
-          <div style="color:var(--text-dim);font-size:12.5px;">${fmtDate(lastSession.date)} · ${lastSession.duration} min · ${lastSession.volume}kg de volume</div>
+    <details class="dash-section">
+      <summary>
+        <span class="dash-section-title">Progresso</span>
+        <span class="dash-section-glance">🔥 ${streak} dia${streak===1?'':'s'} · ${wp.done}/${wp.total} essa semana</span>
+      </summary>
+      <div class="dash-section-body">
+        <div class="grid grid-3" style="margin-bottom:16px;">
+          <div class="card stat-card"><span class="stat-label">Sequência</span><span class="stat-value">🔥 ${streak}</span></div>
+          <div class="card stat-card"><span class="stat-label">Treinos/semana</span><span class="stat-value">${wp.done}<span style="font-size:13px;color:var(--text-dim);">/${wp.total}</span></span></div>
+          <div class="card stat-card"><span class="stat-label">Peso atual</span><span class="stat-value">${state.user.weight}<span style="font-size:13px;color:var(--text-dim);">kg</span></span></div>
         </div>
-      </div>
-    ` : `<div class="empty-state"><span class="emoji">📋</span>Seu histórico de treinos aparece aqui.</div>`}
 
-    <div class="section-title">Conquistas <span class="link" data-nav="progresso" data-navtab="conquistas">ver todas</span></div>
-    ${lastAchievement ? `
-      <div class="card interactive mini-preview-row" data-nav="progresso" data-navtab="conquistas" style="cursor:pointer;">
-        <div class="list-row-icon" style="font-size:24px;">${lastAchievement.emoji}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-weight:700;font-size:14px;">${lastAchievement.name}</div>
-          <div style="color:var(--text-dim);font-size:12.5px;">Desbloqueada · ${lastAchievement.desc}</div>
-        </div>
+        <div class="section-title" style="margin-top:0;">Último recorde</div>
+        ${pr ? `
+          <div class="card mini-preview-row" style="margin-bottom:16px;">
+            <div class="list-row-icon">🏆</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${pr.name}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">${pr.weight}kg · ${fmtDate(pr.date)}</div>
+            </div>
+          </div>
+        ` : `<div class="empty-state" style="margin-bottom:16px;"><span class="emoji">🏋️</span>Seus recordes de carga aparecem aqui.</div>`}
+
+        <div class="section-title">Último peso registrado</div>
+        ${lastWeight ? `
+          <div class="card mini-preview-row" style="margin-bottom:16px;">
+            <div class="list-row-icon">⚖️</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${lastWeight.weight}kg</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">${fmtDate(lastWeight.date)}</div>
+            </div>
+          </div>
+        ` : `<div class="empty-state" style="margin-bottom:16px;"><span class="emoji">⚖️</span>Registre seu peso pra acompanhar aqui.</div>`}
+
+        <div class="section-title">Metas <span class="link" data-nav="profile" data-navtab="metas">ver todas</span></div>
+        <div class="progress-track" style="margin-bottom:10px;"><div class="progress-fill" style="width:${goalsTotal?Math.round(goalsDone/goalsTotal*100):0}%;"></div></div>
+        <p style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px;">${goalsDone} de ${goalsTotal} metas concluídas</p>
+        <div id="miniGoals"></div>
       </div>
-    ` : nextAchievement ? `
-      <div class="card mini-preview-row" style="opacity:.65;">
-        <div class="list-row-icon" style="font-size:24px;filter:grayscale(1);">${nextAchievement.emoji}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-weight:700;font-size:14px;">${nextAchievement.name}</div>
-          <div style="color:var(--text-dim);font-size:12.5px;">Próxima meta · ${nextAchievement.desc}</div>
-        </div>
+    </details>
+
+    <details class="dash-section">
+      <summary>
+        <span class="dash-section-title">Atividade</span>
+        <span class="dash-section-glance">${lastAchievement?lastAchievement.name:(lastSession?lastSession.name:'sem atividade ainda')}</span>
+      </summary>
+      <div class="dash-section-body">
+        <div class="section-title" style="margin-top:0;">Próximo treino agendado</div>
+        ${upcoming ? `
+          <div class="card mini-preview-row" style="margin-bottom:16px;">
+            <div class="list-row-icon">${MUSCLE_ICONS[upcoming.template.muscle]||'🏋️'}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${upcoming.template.name}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">${WEEKDAY_NAMES[upcoming.date.getDay()]}</div>
+            </div>
+          </div>
+        ` : `<div class="empty-state" style="margin-bottom:16px;"><span class="emoji">📅</span>Nada mais agendado essa semana.</div>`}
+
+        <div class="section-title">Conquista recente <span class="link" data-nav="progresso" data-navtab="conquistas">ver todas</span></div>
+        ${lastAchievement ? `
+          <div class="card interactive mini-preview-row" data-nav="progresso" data-navtab="conquistas" style="cursor:pointer;margin-bottom:16px;">
+            <div class="list-row-icon" style="font-size:24px;">${lastAchievement.emoji}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${lastAchievement.name}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">Desbloqueada · ${lastAchievement.desc}</div>
+            </div>
+          </div>
+        ` : nextAchievement ? `
+          <div class="card mini-preview-row" style="opacity:.65;margin-bottom:16px;">
+            <div class="list-row-icon" style="font-size:24px;filter:grayscale(1);">${nextAchievement.emoji}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${nextAchievement.name}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">Próxima meta · ${nextAchievement.desc}</div>
+            </div>
+          </div>
+        ` : `<div class="empty-state" style="margin-bottom:16px;"><span class="emoji">🏆</span>Suas conquistas aparecem aqui.</div>`}
+
+        <div class="section-title">Atividade recente <span class="link" data-nav="history">ver tudo</span></div>
+        ${lastSession ? `
+          <div class="card interactive mini-preview-row" data-nav="history" style="cursor:pointer;">
+            <div class="list-row-icon">${MUSCLE_ICONS[getTemplate(lastSession.templateId)?.muscle]||'🏋️'}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${lastSession.name}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">${fmtDate(lastSession.date)} · ${lastSession.duration} min · ${lastSession.volume}kg de volume</div>
+            </div>
+          </div>
+        ` : `<div class="empty-state"><span class="emoji">📋</span>Seu histórico de treinos aparece aqui.</div>`}
       </div>
-    ` : `<div class="empty-state"><span class="emoji">🏆</span>Suas conquistas aparecem aqui.</div>`}
+    </details>
   `;
 
-  renderMiniWeek();
   renderMiniGoals();
 
   document.getElementById('notifBtn').addEventListener('click', openNotifPanel);
@@ -1921,29 +2024,6 @@ function renderDashboard(){
   }
   wrap.querySelectorAll('[data-nav]').forEach(el=>el.addEventListener('click',()=>navigate(el.dataset.nav, el.dataset.navtab)));
   makeInteractiveElementsAccessible(wrap);
-}
-
-function renderMiniWeek(){
-  const el = document.getElementById('miniWeek');
-  if(!el) return;
-  const start = startOfWeek(new Date());
-  let html = '<div class="week-grid">';
-  for(let i=0;i<7;i++){
-    const d = new Date(start); d.setDate(start.getDate()+i);
-    const key = todayKey(d);
-    const planId = state.weekPlan[d.getDay()];
-    const tpl = getTemplate(planId);
-    const isToday = key===todayKey();
-    const done = !!state.completedDates[key];
-    const isRest = tpl.id==='descanso';
-    html += `<div class="day-card ${isToday?'today':''} ${done?'done':''} ${isRest?'rest':''}">
-      <span class="day-name">${WEEKDAY_SHORT[d.getDay()]}</span>
-      <span class="day-status">${isRest?'💤':done?'✅':'⬜'}</span>
-      <span class="day-workout">${isRest?'Descanso':tpl.name}</span>
-    </div>`;
-  }
-  html += '</div>';
-  el.innerHTML = html;
 }
 
 function renderMiniGoals(){
