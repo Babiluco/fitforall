@@ -324,6 +324,11 @@ function renderDashboard(){
   const lastSession = [...state.history].sort((a,b)=>b.date.localeCompare(a.date))[0];
   const lastAchievement = [...state.unlockedAchievements].reverse().map(id=>ACHIEVEMENTS.find(a=>a.id===id)).find(Boolean);
   const nextAchievement = ACHIEVEMENTS.find(a=>!state.unlockedAchievements.includes(a.id));
+  const upcoming = upcomingAfterHero(nw);
+  const pr = latestPersonalRecord();
+  const lastWeight = [...(state.weightLog||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
+  const goalsTotal = state.goals.length;
+  const goalsDone = state.goals.filter(g=>g.done).length;
 
   wrap.innerHTML = `
     <div class="view-header">
@@ -339,13 +344,14 @@ function renderDashboard(){
     <div class="card hero-card ${nw?'interactive':''}" id="nextWorkoutCard" ${nw?'style="cursor:pointer;"':''}>
       ${nw ? `
         <div class="hero-eyebrow">${nw.isToday?'Treino de hoje':WEEKDAY_NAMES[nw.date.getDay()]}</div>
-        <div style="display:flex;align-items:center;gap:14px;">
+        <div style="display:flex;align-items:center;gap:16px;">
           <div class="list-row-icon" style="width:56px;height:56px;font-size:24px;flex-shrink:0;">${MUSCLE_ICONS[nw.template.muscle]||'🏋️'}</div>
           <div style="min-width:0;">
             <div style="font-weight:800;font-size:19px;">${nw.template.name}</div>
             <div class="hero-meta">
               <span>⏱️ ${nw.template.estimatedTime} min</span>
               <span>🏋️ ${nw.template.exercises.length} exercícios</span>
+              <span>🔥 ~${estimatedCalories(nw.template)} kcal</span>
             </div>
           </div>
         </div>
@@ -353,52 +359,97 @@ function renderDashboard(){
       ` : `<div class="empty-state"><span class="emoji">🎉</span>Você concluiu todos os treinos da semana! Aproveite pra descansar.</div>`}
     </div>
 
-    <div class="section-title">Resumo da semana <span class="link" data-nav="agenda">ver agenda</span></div>
-    <div id="miniWeek"></div>
-
-    <div class="section-title">Objetivos de hoje <span class="link" data-nav="profile" data-navtab="metas">ver todas</span></div>
-    <div id="miniGoals"></div>
-
-    <div class="section-title">Seu progresso <span class="link" data-nav="stats">ver estatísticas</span></div>
-    <div class="progress-strip">
-      <div class="progress-chip"><span class="stat-label">Treinos/semana</span><span class="stat-value">${wp.done}<span style="font-size:13px;color:var(--text-dim);"> /${wp.total}</span></span></div>
-      <div class="progress-chip"><span class="stat-label">Sequência</span><span class="stat-value">🔥 ${streak}</span></div>
-      <div class="progress-chip"><span class="stat-label">Peso atual</span><span class="stat-value">${state.user.weight}<span style="font-size:13px;color:var(--text-dim);">kg</span></span></div>
-      <div class="progress-chip"><span class="stat-label">IMC</span><span class="stat-value">${bmi()}</span></div>
-    </div>
-
-    <div class="section-title">Histórico recente <span class="link" data-nav="history">ver tudo</span></div>
-    ${lastSession ? `
-      <div class="card interactive mini-preview-row" data-nav="history" style="cursor:pointer;">
-        <div class="list-row-icon">${MUSCLE_ICONS[getTemplate(lastSession.templateId)?.muscle]||'🏋️'}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-weight:700;font-size:14px;">${lastSession.name}</div>
-          <div style="color:var(--text-dim);font-size:12.5px;">${fmtDate(lastSession.date)} · ${lastSession.duration} min · ${lastSession.volume}kg de volume</div>
+    <details class="dash-section">
+      <summary>
+        <span class="dash-section-title">Progresso</span>
+        <span class="dash-section-glance">🔥 ${streak} dia${streak===1?'':'s'} · ${wp.done}/${wp.total} essa semana</span>
+      </summary>
+      <div class="dash-section-body">
+        <div class="grid grid-3" style="margin-bottom:16px;">
+          <div class="card stat-card"><span class="stat-label">Sequência</span><span class="stat-value">🔥 ${streak}</span></div>
+          <div class="card stat-card"><span class="stat-label">Treinos/semana</span><span class="stat-value">${wp.done}<span style="font-size:13px;color:var(--text-dim);">/${wp.total}</span></span></div>
+          <div class="card stat-card"><span class="stat-label">Peso atual</span><span class="stat-value">${state.user.weight}<span style="font-size:13px;color:var(--text-dim);">kg</span></span></div>
         </div>
-      </div>
-    ` : `<div class="empty-state"><span class="emoji">📋</span>Seu histórico de treinos aparece aqui.</div>`}
 
-    <div class="section-title">Conquistas <span class="link" data-nav="progresso" data-navtab="conquistas">ver todas</span></div>
-    ${lastAchievement ? `
-      <div class="card interactive mini-preview-row" data-nav="progresso" data-navtab="conquistas" style="cursor:pointer;">
-        <div class="list-row-icon" style="font-size:24px;">${lastAchievement.emoji}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-weight:700;font-size:14px;">${lastAchievement.name}</div>
-          <div style="color:var(--text-dim);font-size:12.5px;">Desbloqueada · ${lastAchievement.desc}</div>
-        </div>
+        <div class="section-title" style="margin-top:0;">Último recorde</div>
+        ${pr ? `
+          <div class="card mini-preview-row" style="margin-bottom:16px;">
+            <div class="list-row-icon">🏆</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${pr.name}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">${pr.weight}kg · ${fmtDate(pr.date)}</div>
+            </div>
+          </div>
+        ` : `<div class="empty-state" style="margin-bottom:16px;"><span class="emoji">🏋️</span>Seus recordes de carga aparecem aqui.</div>`}
+
+        <div class="section-title">Último peso registrado</div>
+        ${lastWeight ? `
+          <div class="card mini-preview-row" style="margin-bottom:16px;">
+            <div class="list-row-icon">⚖️</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${lastWeight.weight}kg</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">${fmtDate(lastWeight.date)}</div>
+            </div>
+          </div>
+        ` : `<div class="empty-state" style="margin-bottom:16px;"><span class="emoji">⚖️</span>Registre seu peso pra acompanhar aqui.</div>`}
+
+        <div class="section-title">Metas <span class="link" data-nav="profile" data-navtab="metas">ver todas</span></div>
+        <div class="progress-track" style="margin-bottom:10px;"><div class="progress-fill" style="width:${goalsTotal?Math.round(goalsDone/goalsTotal*100):0}%;"></div></div>
+        <p style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px;">${goalsDone} de ${goalsTotal} metas concluídas</p>
+        <div id="miniGoals"></div>
       </div>
-    ` : nextAchievement ? `
-      <div class="card mini-preview-row" style="opacity:.65;">
-        <div class="list-row-icon" style="font-size:24px;filter:grayscale(1);">${nextAchievement.emoji}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-weight:700;font-size:14px;">${nextAchievement.name}</div>
-          <div style="color:var(--text-dim);font-size:12.5px;">Próxima meta · ${nextAchievement.desc}</div>
-        </div>
+    </details>
+
+    <details class="dash-section">
+      <summary>
+        <span class="dash-section-title">Atividade</span>
+        <span class="dash-section-glance">${lastAchievement?lastAchievement.name:(lastSession?lastSession.name:'sem atividade ainda')}</span>
+      </summary>
+      <div class="dash-section-body">
+        <div class="section-title" style="margin-top:0;">Próximo treino agendado</div>
+        ${upcoming ? `
+          <div class="card mini-preview-row" style="margin-bottom:16px;">
+            <div class="list-row-icon">${MUSCLE_ICONS[upcoming.template.muscle]||'🏋️'}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${upcoming.template.name}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">${WEEKDAY_NAMES[upcoming.date.getDay()]}</div>
+            </div>
+          </div>
+        ` : `<div class="empty-state" style="margin-bottom:16px;"><span class="emoji">📅</span>Nada mais agendado essa semana.</div>`}
+
+        <div class="section-title">Conquista recente <span class="link" data-nav="progresso" data-navtab="conquistas">ver todas</span></div>
+        ${lastAchievement ? `
+          <div class="card interactive mini-preview-row" data-nav="progresso" data-navtab="conquistas" style="cursor:pointer;margin-bottom:16px;">
+            <div class="list-row-icon" style="font-size:24px;">${lastAchievement.emoji}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${lastAchievement.name}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">Desbloqueada · ${lastAchievement.desc}</div>
+            </div>
+          </div>
+        ` : nextAchievement ? `
+          <div class="card mini-preview-row" style="opacity:.65;margin-bottom:16px;">
+            <div class="list-row-icon" style="font-size:24px;filter:grayscale(1);">${nextAchievement.emoji}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${nextAchievement.name}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">Próxima meta · ${nextAchievement.desc}</div>
+            </div>
+          </div>
+        ` : `<div class="empty-state" style="margin-bottom:16px;"><span class="emoji">🏆</span>Suas conquistas aparecem aqui.</div>`}
+
+        <div class="section-title">Atividade recente <span class="link" data-nav="history">ver tudo</span></div>
+        ${lastSession ? `
+          <div class="card interactive mini-preview-row" data-nav="history" style="cursor:pointer;">
+            <div class="list-row-icon">${MUSCLE_ICONS[getTemplate(lastSession.templateId)?.muscle]||'🏋️'}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${lastSession.name}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">${fmtDate(lastSession.date)} · ${lastSession.duration} min · ${lastSession.volume}kg de volume</div>
+            </div>
+          </div>
+        ` : `<div class="empty-state"><span class="emoji">📋</span>Seu histórico de treinos aparece aqui.</div>`}
       </div>
-    ` : `<div class="empty-state"><span class="emoji">🏆</span>Suas conquistas aparecem aqui.</div>`}
+    </details>
   `;
 
-  renderMiniWeek();
   renderMiniGoals();
 
   document.getElementById('notifBtn').addEventListener('click', openNotifPanel);
@@ -414,29 +465,6 @@ function renderDashboard(){
   }
   wrap.querySelectorAll('[data-nav]').forEach(el=>el.addEventListener('click',()=>navigate(el.dataset.nav, el.dataset.navtab)));
   makeInteractiveElementsAccessible(wrap);
-}
-
-function renderMiniWeek(){
-  const el = document.getElementById('miniWeek');
-  if(!el) return;
-  const start = startOfWeek(new Date());
-  let html = '<div class="week-grid">';
-  for(let i=0;i<7;i++){
-    const d = new Date(start); d.setDate(start.getDate()+i);
-    const key = todayKey(d);
-    const planId = state.weekPlan[d.getDay()];
-    const tpl = getTemplate(planId);
-    const isToday = key===todayKey();
-    const done = !!state.completedDates[key];
-    const isRest = tpl.id==='descanso';
-    html += `<div class="day-card ${isToday?'today':''} ${done?'done':''} ${isRest?'rest':''}">
-      <span class="day-name">${WEEKDAY_SHORT[d.getDay()]}</span>
-      <span class="day-status">${isRest?'💤':done?'✅':'⬜'}</span>
-      <span class="day-workout">${isRest?'Descanso':tpl.name}</span>
-    </div>`;
-  }
-  html += '</div>';
-  el.innerHTML = html;
 }
 
 function renderMiniGoals(){
