@@ -49,9 +49,24 @@ const RestTimer = (function(){
     if(intervalId){ clearInterval(intervalId); intervalId=null; }
   }
 
+  function pause(){ stop(); } // stop() já preserva remaining/total — pausar é só isso
+
+  function resume(){
+    if(intervalId || remaining<=0) return;
+    intervalId = setInterval(()=>{
+      remaining--;
+      if(onTick) onTick(remaining, total);
+      if(remaining<=0){
+        stop();
+        beep();
+        if(onDone) onDone();
+      }
+    },1000);
+  }
+
   function isRunning(){ return intervalId !== null; }
   function getRemaining(){ return remaining; }
   function getTotal(){ return total; }
 
-  return {start, stop, isRunning, getRemaining, getTotal};
+  return {start, stop, pause, resume, isRunning, getRemaining, getTotal};
 })();
