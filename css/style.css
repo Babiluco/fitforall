@@ -294,6 +294,20 @@ main.view-wrap{
   display:flex;align-items:center;gap:14px;padding:14px 16px;
 }
 
+.analysis-banner{
+  display:flex;align-items:flex-start;gap:10px;padding:14px 16px;border-radius:var(--radius);
+  font-size:13px;font-weight:600;margin-bottom:20px;line-height:1.5;
+}
+.analysis-banner.warning{background:rgba(239,68,68,.1);color:#ff9a9a;border:1px solid rgba(239,68,68,.3);}
+.analysis-banner.info{background:rgba(51,85,255,.1);color:var(--accent-text);border:1px solid rgba(51,85,255,.25);}
+
+.balance-row{display:flex;align-items:center;gap:12px;padding:9px 0;}
+.balance-label{width:78px;flex-shrink:0;font-size:12.5px;font-weight:600;}
+.balance-track{flex:1;height:8px;border-radius:99px;background:var(--border);overflow:hidden;}
+.balance-fill{height:100%;border-radius:99px;transition:width .5s var(--ease);}
+.balance-status{width:96px;flex-shrink:0;font-size:11px;font-weight:700;text-align:right;}
+.pr-celebration{border-color:var(--purple);background:rgba(166,111,252,.06);}
+
 .ring{position:relative;width:78px;height:78px;flex-shrink:0;}
 .ring svg{transform:rotate(-90deg);}
 .ring circle{fill:none;stroke-width:8;}
