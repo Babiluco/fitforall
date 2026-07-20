@@ -25,14 +25,29 @@ manifest.json       → configuração do PWA (ícone, nome, tela cheia)
 icons/               → ícones do app (192px, 512px, apple-touch-icon)
 favicon.ico          → ícone da aba do navegador
 css/style.css        → estilos (tema, cores, layout)
+js/config.js         → configuração central (nome, versão, ambiente, debug, chave do storage)
+js/utils.js          → funções puras reutilizadas em todo o app (datas, texto, id)
 js/storage.js        → persistência dos dados (localStorage)
+js/database.js       → camada de acesso a dados (saveWorkout, loadProfile etc.) — hoje usa localStorage por baixo, preparada pra trocar por um backend depois
+js/api.js            → cliente de API simulado (mock) — ainda não conecta em lugar nenhum
+js/auth.js           → arquitetura de login (login/logout/isLogged) — ainda mock, sem login real
+js/sync.js           → sincronização em nuvem (mock) — app continua 100% offline por enquanto
 js/data.js           → dados padrão (treinos, exercícios)
 js/icons.js          → biblioteca de ícones SVG (navegação e botões)
+js/analytics.js      → sistema inteligente de progresso (recordes, tendências, platôs, resumos)
 js/timer.js          → cronômetro de descanso
 js/charts.js         → gráficos (barras, linha, anel de progresso)
-js/app.js            → lógica principal da aplicação
+js/app.js            → lógica principal da aplicação (telas, navegação, interações)
 FitForAll.html        → versão única, tudo embutido (alternativa ao index.html + pastas)
 ```
+
+## 🏗️ Arquitetura (preparado pra crescer)
+
+O app continua 100% offline, em Vanilla JS — sem framework, sem build step. Mas o `js/` agora tem uma separação clara de responsabilidades, pensando em uma futura migração pra um backend (ex: Supabase):
+
+- **`database.js`** é o único lugar que deveria crescer quando o app ganhar um servidor de verdade — hoje ele já funciona (não é decoração), só que por baixo dos panos ainda salva tudo no `localStorage`.
+- **`api.js`**, **`auth.js`** e **`sync.js`** existem como esqueleto: todos os métodos já têm o nome e o formato de resposta que vão ter no futuro, mas nenhum se conecta a nada ainda — são só simulações (`mock:true` na resposta).
+- O resto do app (`app.js`) continua funcionando exatamente como antes; a migração pra usar `database.js` em vez de acessar os dados direto pode ser feita aos poucos, tela por tela, sem pressa.
 
 ## ✨ O que dá pra fazer no app
 
