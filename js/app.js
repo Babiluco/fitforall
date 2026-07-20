@@ -273,22 +273,6 @@ function upcomingAfterHero(nw){
   return null;
 }
 
-/* Maior carga recorde mais recente, entre todos os exercícios já registrados. */
-function latestPersonalRecord(){
-  let best = null;
-  Object.keys(state.exerciseLoads).forEach(exId=>{
-    const logs = [...state.exerciseLoads[exId]].sort((a,b)=>a.date.localeCompare(b.date));
-    logs.forEach((l,i)=>{
-      const prevMax = i===0 ? 0 : Math.max(...logs.slice(0,i).map(x=>x.weight));
-      if(l.weight>prevMax && (!best || l.date>best.date)){
-        const e = findExercise(exId);
-        best = {date:l.date, weight:l.weight, name: e?e.name:exId};
-      }
-    });
-  });
-  return best;
-}
-
 /* Estimativa de calorias pra um treino ainda não realizado, usando o mesmo
    cálculo aplicado a sessões concluídas (volume*0.05 + minutos*4), só que
    com o volume PLANEJADO do treino (séries×reps×carga) em vez do real. */
@@ -325,7 +309,7 @@ function renderDashboard(){
   const lastAchievement = [...state.unlockedAchievements].reverse().map(id=>ACHIEVEMENTS.find(a=>a.id===id)).find(Boolean);
   const nextAchievement = ACHIEVEMENTS.find(a=>!state.unlockedAchievements.includes(a.id));
   const upcoming = upcomingAfterHero(nw);
-  const pr = latestPersonalRecord();
+  const pr = Analytics.latestPR();
   const lastWeight = [...(state.weightLog||[])].sort((a,b)=>b.date.localeCompare(a.date))[0];
   const goalsTotal = state.goals.length;
   const goalsDone = state.goals.filter(g=>g.done).length;
@@ -373,11 +357,11 @@ function renderDashboard(){
 
         <div class="section-title" style="margin-top:0;">Último recorde</div>
         ${pr ? `
-          <div class="card mini-preview-row" style="margin-bottom:16px;">
-            <div class="list-row-icon">🏆</div>
+          <div class="card mini-preview-row pr-celebration" style="margin-bottom:16px;">
+            <div class="list-row-icon" style="background:rgba(166,111,252,.15);">🏆</div>
             <div style="flex:1;min-width:0;">
-              <div style="font-weight:700;font-size:14px;">${pr.name}</div>
-              <div style="color:var(--text-dim);font-size:12.5px;">${pr.weight}kg · ${fmtDate(pr.date)}</div>
+              <div style="font-weight:700;font-size:14px;">${pr.label}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">${pr.value}${pr.date?' · '+fmtDate(pr.date):''}</div>
             </div>
           </div>
         ` : `<div class="empty-state" style="margin-bottom:16px;"><span class="emoji">🏋️</span>Seus recordes de carga aparecem aqui.</div>`}
@@ -1563,7 +1547,90 @@ function openExerciseModal(exId){
     <h4 style="font-size:13px;margin-bottom:6px;">⚠️ Erros comuns</h4>
     <p style="font-size:13px;color:var(--text-dim);line-height:1.6;">${e.mistakes}</p>
     ${lastLog?`<hr class="sep"><h4 style="font-size:13px;margin-bottom:6px;">📈 Última carga registrada</h4><p style="font-size:13px;">${lastLog.weight}kg em ${fmtDate(lastLog.date)}</p>`:''}
+    ${logs.length>=2?`<button class="btn btn-primary btn-block" id="viewAnalyticsBtn" style="margin-top:16px;">Ver progresso detalhado</button>`:''}
   `);
+  const analyticsBtn = document.getElementById('viewAnalyticsBtn');
+  if(analyticsBtn) analyticsBtn.addEventListener('click', ()=>openExerciseAnalytics(exId));
+}
+
+const TREND_LABEL = {'▲':'Melhorando', '▬':'Estável', '▼':'Diminuindo'};
+const TREND_COLOR = {'▲':'var(--green)', '▬':'var(--text-dim)', '▼':'var(--red)'};
+
+/* ======================================================================
+   FEATURE 10 — Tela de análise detalhada de um exercício
+   ====================================================================== */
+function openExerciseAnalytics(exId){
+  const e = findExercise(exId);
+  const logs = Analytics.exerciseLogs(exId);
+  const trend = Analytics.exerciseTrend(exId);
+  const plateau = Analytics.detectPlateau(exId);
+  const overload = Analytics.overloadSuggestion(exId);
+  const prs = Analytics.detectPRs().filter(p=>p.exerciseId===exId);
+
+  const totalSessions = logs.length;
+  const totalVolume = logs.reduce((a,l)=>a+(l.weight*(l.reps||0)),0);
+  const avgWeight = totalSessions ? Math.round(logs.reduce((a,l)=>a+l.weight,0)/totalSessions*10)/10 : 0;
+  const avgReps = totalSessions ? Math.round(logs.reduce((a,l)=>a+(l.reps||0),0)/totalSessions*10)/10 : 0;
+  const best1RM = Math.max(0, ...logs.map(l=>Analytics.estimated1RM(l.weight,l.reps||1)));
+
+  openModal(`
+    <h2 style="margin-bottom:4px;">${e.name}</h2>
+    <span class="muscle-tag">${MUSCLE_LABELS[e.muscle]}</span>
+
+    <div class="grid grid-3" style="margin:18px 0;">
+      <div class="stat-card"><span class="stat-label">1RM estimado</span><span class="stat-value" style="font-size:18px;">${best1RM}kg</span></div>
+      <div class="stat-card"><span class="stat-label">Sessões</span><span class="stat-value" style="font-size:18px;">${totalSessions}</span></div>
+      <div class="stat-card"><span class="stat-label">Volume total</span><span class="stat-value" style="font-size:18px;">${totalVolume}kg</span></div>
+    </div>
+
+    ${trend.status==='ok' ? `
+      <div class="section-title" style="margin-top:0;">Tendência</div>
+      <div class="card" style="margin-bottom:16px;">
+        ${[['Última sessão',trend.lastVsPrevious],['Últimos 30 dias',trend.last30Days],['Últimos 90 dias',trend.last90Days],['Desde o início',trend.allTime]].map(([label,sym])=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-top:1px solid var(--border);">
+            <span style="font-size:13px;color:var(--text-dim);">${label}</span>
+            <span style="font-weight:700;color:${TREND_COLOR[sym]};">${sym} ${TREND_LABEL[sym]}</span>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
+    <div class="section-title">Carga ao longo do tempo</div>
+    <div class="card" id="exAnalyticsWeightChart" style="margin-bottom:16px;"></div>
+
+    <div class="section-title">Peso médio · repetições médias</div>
+    <div class="grid grid-2" style="margin-bottom:16px;">
+      <div class="stat-card"><span class="stat-label">Peso médio</span><span class="stat-value" style="font-size:16px;">${avgWeight}kg</span></div>
+      <div class="stat-card"><span class="stat-label">Reps médias</span><span class="stat-value" style="font-size:16px;">${avgReps}</span></div>
+    </div>
+
+    ${plateau ? `
+      <div class="card" style="margin-bottom:16px;">
+        <div class="list-row-title">⚠️ Possível platô</div>
+        <p style="font-size:12.5px;color:var(--text-dim);margin:4px 0 10px;">Sem progresso há ${plateau.sessions} sessões (${plateau.reason}).</p>
+        <div class="chip-row">${plateau.suggestions.map(s=>`<span class="chip">${s}</span>`).join('')}</div>
+      </div>
+    ` : ''}
+    ${overload ? `<div class="card" style="margin-bottom:16px;"><div class="list-row-title">💪 Pronto pra evoluir</div><p style="font-size:12.5px;color:var(--text-dim);margin:4px 0 0;">${overload.message}</p></div>` : ''}
+
+    ${prs.length ? `
+      <div class="section-title">Recordes</div>
+      <div style="margin-bottom:16px;">
+        ${prs.map(pr=>`<div class="card mini-preview-row" style="margin-bottom:8px;"><div class="list-row-icon">🏆</div><div><div style="font-weight:700;font-size:13.5px;">${pr.label.split('·')[0].trim()}</div><div style="color:var(--text-dim);font-size:12px;">${pr.value}${pr.date?' · '+fmtDate(pr.date):''}</div></div></div>`).join('')}
+      </div>
+    ` : ''}
+
+    <div class="section-title">Últimas sessões</div>
+    <div>
+      ${[...logs].reverse().slice(0,6).map(l=>`
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:8px 0;border-top:1px solid var(--border);">
+          <span style="color:var(--text-dim);">${fmtDate(l.date)}</span>
+          <span style="font-weight:700;">${l.weight}kg × ${l.reps||0}</span>
+        </div>
+      `).join('')}
+    </div>
+  `);
+  renderLineChart(document.getElementById('exAnalyticsWeightChart'), logs.map(l=>({label:fmtDate(l.date).slice(0,5), value:l.weight})));
 }
 
 /* ======================================================================
@@ -1578,6 +1645,7 @@ function renderProgresso(){
   const wrap = document.getElementById('viewWrap');
   const tabs = [
     {id:'geral', label:'Visão Geral'},
+    {id:'analise', label:'Análise'},
     {id:'historico', label:'Histórico'},
     {id:'conquistas', label:'Conquistas'},
   ];
@@ -1591,9 +1659,112 @@ function renderProgresso(){
   document.querySelectorAll('[data-progressotab]').forEach(btn=>{
     btn.addEventListener('click', ()=>{ currentProgressoTab=btn.dataset.progressotab; renderProgresso(); });
   });
-  const renderers = {geral: renderStats, historico: renderHistory, conquistas: renderConquistas};
+  const renderers = {geral: renderStats, analise: renderAnalysis, historico: renderHistory, conquistas: renderConquistas};
   renderers[currentProgressoTab]();
   makeInteractiveElementsAccessible(document.getElementById('progressoTabContent'));
+}
+
+/* ======================================================================
+   ANÁLISE — sistema inteligente de progresso (Analytics, ver analytics.js)
+   ====================================================================== */
+function renderAnalysis(){
+  const wrap = document.getElementById('progressoTabContent');
+  const ws = Analytics.weeklySummary();
+  const ms = Analytics.monthlySummary();
+  const balance = Analytics.muscleBalance();
+  const recovery = Analytics.recoveryInsight();
+  const plateaus = Analytics.allPlateaus();
+  const overloads = Analytics.allOverloadSuggestions();
+  const insights = Analytics.smartInsights();
+  const prs = Analytics.detectPRs().slice(0,5);
+
+  const statusLabel = {balanced:'Equilibrado', under:'Pouco treinado', over:'Muito treinado', none:'Sem treino recente'};
+  const statusColor = {balanced:'var(--green)', under:'var(--text-dim)', over:'var(--red)', none:'var(--text-faint)'};
+
+  wrap.innerHTML = `
+    ${recovery ? `<div class="analysis-banner ${recovery.level}">${recovery.level==='warning'?'⚠️':'💡'} ${recovery.message}</div>` : ''}
+
+    ${insights.length ? `
+      <div class="section-title" style="margin-top:0;">Insights</div>
+      <div style="margin-bottom:20px;">
+        ${insights.map(txt=>`<div class="card insight-card">${txt}</div>`).join('')}
+      </div>
+    ` : ''}
+
+    <div class="section-title" style="margin-top:0;">Resumo da semana</div>
+    <div class="grid grid-3" style="margin-bottom:20px;">
+      <div class="card stat-card"><span class="stat-label">Treinos</span><span class="stat-value">${ws.workouts}</span></div>
+      <div class="card stat-card"><span class="stat-label">Volume</span><span class="stat-value">${ws.volume}<span style="font-size:12px;">kg</span></span></div>
+      <div class="card stat-card"><span class="stat-label">Kcal</span><span class="stat-value">${ws.calories}</span></div>
+      <div class="card stat-card"><span class="stat-label">Duração média</span><span class="stat-value">${ws.avgDuration}<span style="font-size:12px;">min</span></span></div>
+      <div class="card stat-card"><span class="stat-label">Grupo principal</span><span class="stat-value" style="font-size:16px;">${ws.topMuscle||'—'}</span></div>
+      <div class="card stat-card"><span class="stat-label">Novos recordes</span><span class="stat-value">${ws.newPRs}</span></div>
+    </div>
+
+    <div class="section-title">Resumo do mês</div>
+    <div class="grid grid-3" style="margin-bottom:20px;">
+      <div class="card stat-card"><span class="stat-label">Treinos</span><span class="stat-value">${ms.workouts}</span></div>
+      <div class="card stat-card"><span class="stat-label">Volume total</span><span class="stat-value">${ms.volume}<span style="font-size:12px;">kg</span></span></div>
+      <div class="card stat-card"><span class="stat-label">Peso corporal</span><span class="stat-value" style="font-size:16px;">${ms.weightTrend!=null?`${ms.weightTrend>0?'+':''}${ms.weightTrend.toFixed(1)}kg`:'—'}</span></div>
+    </div>
+    ${ms.topExercises.length ? `
+      <div class="card" style="margin-bottom:20px;">
+        <div class="list-row-title" style="margin-bottom:10px;">Exercícios mais treinados no mês</div>
+        ${ms.topExercises.map(ex=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-top:1px solid var(--border);"><span>${ex.name}</span><span style="color:var(--text-dim);">${ex.volume}kg</span></div>`).join('')}
+      </div>
+    `:''}
+
+    <div class="section-title">Equilíbrio muscular <span style="font-size:11px;color:var(--text-faint);font-weight:400;">(últimas 4 semanas)</span></div>
+    <div class="card" style="margin-bottom:20px;">
+      ${balance.map(b=>`
+        <div class="balance-row">
+          <span class="balance-label">${b.label}</span>
+          <div class="balance-track"><div class="balance-fill" style="width:${Math.min(100,b.weeklySets/14*100)}%;background:${statusColor[b.status]};"></div></div>
+          <span class="balance-status" style="color:${statusColor[b.status]};">${statusLabel[b.status]}</span>
+        </div>
+      `).join('')}
+    </div>
+
+    ${plateaus.length ? `
+      <div class="section-title">Possíveis platôs</div>
+      <div style="margin-bottom:20px;">
+        ${plateaus.map(p=>`
+          <div class="card" style="margin-bottom:10px;">
+            <div class="list-row-title">⚠️ ${p.exerciseName}</div>
+            <p style="font-size:12.5px;color:var(--text-dim);margin:4px 0 10px;">Sem progresso há ${p.sessions} sessões (${p.reason}).</p>
+            <div class="chip-row">${p.suggestions.map(s=>`<span class="chip">${s}</span>`).join('')}</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
+    ${overloads.length ? `
+      <div class="section-title">Pronto pra evoluir</div>
+      <div style="margin-bottom:20px;">
+        ${overloads.map(o=>`
+          <div class="card" style="margin-bottom:10px;">
+            <div class="list-row-title">💪 ${o.exerciseName}</div>
+            <p style="font-size:12.5px;color:var(--text-dim);margin:4px 0 0;">${o.message}</p>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
+    ${prs.length ? `
+      <div class="section-title">Últimos recordes</div>
+      <div>
+        ${prs.map(pr=>`
+          <div class="card mini-preview-row" style="margin-bottom:10px;">
+            <div class="list-row-icon">🏆</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:14px;">${pr.label}</div>
+              <div style="color:var(--text-dim);font-size:12.5px;">${pr.value}${pr.date?' · '+fmtDate(pr.date):''}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : `<div class="empty-state"><span class="emoji">🏆</span>Seus recordes aparecem aqui conforme você treina.</div>`}
+  `;
 }
 
 function renderHistory(){
