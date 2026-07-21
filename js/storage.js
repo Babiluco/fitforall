@@ -2,7 +2,7 @@
    FitForAll — Persistência (LocalStorage)
    ========================================================================== */
 
-const STORAGE_KEY = 'fittrack_state_v1';
+const STORAGE_KEY = CONFIG.STORAGE_KEY;
 
 function defaultState(){
   return {
@@ -32,6 +32,8 @@ function defaultState(){
     checkins:{},                // { 'YYYY-MM-DD': moodId }
     weightLog:[],                // [{date, weight}]
     measurements:[],             // [{date, arm, waist, hips, thigh}] — medidas corporais
+    scheduleOverrides:{},        // { 'YYYY-MM-DD': {type:'workout',templateId} | {type:'rest'} | {type:'cardio'} | {type:'mobility'} | {type:'custom',label} }
+    rescheduleDismissed:{},      // { 'YYYY-MM-DD': true } — dias perdidos que a pessoa já dispensou a sugestão de remarcar
     unlockedAchievements:[],
     fullWeeksCompleted:0,
     xp:0,                        // pontos de experiência (gamificação)
@@ -43,9 +45,7 @@ function defaultState(){
   };
 }
 
-function cryptoId(){
-  return 'id_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
-}
+
 
 function loadState(){
   try{
@@ -72,10 +72,6 @@ function saveState(state){
   }
 }
 
-function todayKey(d){
-  const date = d || new Date();
-  return date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
-}
 
 function computeStreak(completedDates){
   let streak = 0;
