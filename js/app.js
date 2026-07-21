@@ -481,9 +481,11 @@ let currentTreinoTab = 'agenda';
 
 function renderTreino(){
   agendaWeekOffset = 0;
+  calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const wrap = document.getElementById('viewWrap');
   const tabs = [
     {id:'agenda', label:'Agenda'},
+    {id:'calendario', label:'Calendário'},
     {id:'editor', label:'Editar Treinos'},
     {id:'exercicios', label:'Exercícios'},
   ];
@@ -497,9 +499,240 @@ function renderTreino(){
   document.querySelectorAll('[data-treinotab]').forEach(btn=>{
     btn.addEventListener('click', ()=>{ currentTreinoTab=btn.dataset.treinotab; renderTreino(); });
   });
-  const renderers = {agenda: renderAgenda, editor: renderEditor, exercicios: renderExercises};
+  const renderers = {agenda: renderAgenda, calendario: renderCalendarView, editor: renderEditor, exercicios: renderExercises};
   renderers[currentTreinoTab]();
   makeInteractiveElementsAccessible(document.getElementById('treinoTabContent'));
+}
+
+/* ======================================================================
+   CALENDÁRIO — planejador mensal, heatmap e remarcação inteligente
+   (lógica de dados em calendar.js — aqui é só a tela)
+   ====================================================================== */
+let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+const CAL_STATUS_META = {
+  done:      {label:'Concluído', color:'var(--green)',  icon:'check'},
+  missed:    {label:'Perdido',   color:'var(--red)',    icon:'x'},
+  scheduled: {label:'Agendado',  color:'var(--blue)',    icon:'dumbbell'},
+  rest:      {label:'Descanso',  color:'var(--text-faint)', icon:'moon'},
+  cardio:    {label:'Cardio',    color:'var(--purple)', icon:'trending-up'},
+  mobility:  {label:'Mobilidade',color:'var(--purple)', icon:'check'},
+  custom:    {label:'Atividade', color:'var(--purple)', icon:'plus'},
+};
+
+function renderCalendarView(){
+  const wrap = document.getElementById('treinoTabContent');
+  const cons = Calendar.consistencyStats();
+  const missed = Calendar.missedWorkouts();
+  const suggestions = Calendar.smartSuggestions();
+  const recovery = Calendar.weekMuscleRecovery();
+  const year = calendarCursor.getFullYear(), month = calendarCursor.getMonth();
+  const monthLabel = calendarCursor.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  const grid = Calendar.monthGrid(year, month);
+  const hasAnyPlan = Object.values(state.weekPlan).some(id=>{ const t=getTemplate(id); return t && t.id!=='descanso'; }) || Object.keys(state.scheduleOverrides).length>0;
+
+  wrap.innerHTML = `
+    <div class="grid grid-4" style="margin-bottom:18px;">
+      <div class="card stat-card"><span class="stat-label">Sequência</span><span class="stat-value">🔥 ${cons.streak}</span></div>
+      <div class="card stat-card"><span class="stat-label">Maior sequência</span><span class="stat-value">${cons.best}</span></div>
+      <div class="card stat-card"><span class="stat-label">Semana</span><span class="stat-value">${cons.weekDone}<span style="font-size:12px;color:var(--text-dim);">/${cons.weekTotal}</span></span></div>
+      <div class="card stat-card"><span class="stat-label">Consistência do mês</span><span class="stat-value">${cons.monthPct}%</span></div>
+    </div>
+
+    ${missed.length ? `
+      <div class="analysis-banner warning" id="rescheduleBanner">
+        <div style="flex:1;">
+          ⚠️ Você perdeu o treino de <b>${WEEKDAY_NAMES[missed[0].date.getDay()]}</b> (${missed[0].plan.label}). Quer remarcar pra hoje?
+          <div style="display:flex;gap:10px;margin-top:10px;">
+            <button class="btn btn-primary btn-sm" id="rescheduleAcceptBtn">Remarcar pra hoje</button>
+            <button class="btn btn-ghost btn-sm" id="rescheduleDismissBtn">Dispensar</button>
+          </div>
+        </div>
+      </div>
+    ` : ''}
+
+    ${suggestions.length ? `
+      <div class="section-title" style="margin-top:0;">Sugestões</div>
+      <div style="margin-bottom:18px;">${suggestions.map(s=>`<div class="card insight-card">${s}</div>`).join('')}</div>
+    ` : ''}
+
+    ${recovery.some(r=>r.warning) ? `
+      <div class="section-title" style="margin-top:0;">Recuperação muscular</div>
+      <div class="card" style="margin-bottom:18px;">
+        ${recovery.map(r=>`<span class="chip ${r.warning?'':'active'}" style="${r.warning?'border-color:var(--red);color:var(--red);':''}margin:0 6px 6px 0;">${r.label} · ${r.days}x essa semana${r.warning?' ⚠️':''}</span>`).join('')}
+      </div>
+    ` : ''}
+
+    <div class="agenda-week-nav">
+      <button class="icon-btn" id="calPrevMonth" aria-label="Mês anterior">${icon('chevron-left')}</button>
+      <div class="agenda-week-label"><span style="text-transform:capitalize;">${monthLabel}</span></div>
+      <button class="icon-btn" id="calNextMonth" aria-label="Próximo mês">${icon('chevron-right')}</button>
+    </div>
+
+    ${hasAnyPlan ? `
+      <div class="cal-grid" id="calGrid" role="grid" aria-label="Calendário de treinos">
+        ${['D','S','T','Q','Q','S','S'].map(d=>`<div class="cal-weekday">${d}</div>`).join('')}
+        ${grid.map(cell=>{
+          if(!cell) return `<div class="cal-cell cal-empty"></div>`;
+          const meta = CAL_STATUS_META[cell.status];
+          const draggable = cell.status==='scheduled'||cell.status==='missed'||cell.status==='done';
+          return `<div class="cal-cell ${cell.isToday?'today':''} ${draggable?'cal-draggable':''}" data-datekey="${cell.dateKey}" tabindex="0" role="gridcell" aria-label="${cell.date.getDate()} - ${meta.label}${cell.isToday?' - hoje':''}">
+            <span class="cal-daynum">${cell.date.getDate()}</span>
+            <span class="cal-dot" style="background:${meta.color};" title="${meta.label}"></span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="cal-legend">
+        ${Object.entries(CAL_STATUS_META).map(([k,m])=>`<span class="cal-legend-item"><span class="cal-dot" style="background:${m.color};"></span>${m.label}</span>`).join('')}
+      </div>
+    ` : `<div class="empty-state" style="margin-bottom:18px;"><span class="emoji">📅</span>Vamos planejar seu primeiro treino.<div style="margin-top:14px;"><button class="btn btn-primary" data-nav="treino" data-navtab="editor">Criar plano de treino</button></div></div>`}
+
+    <div class="section-title">Constância <span style="font-size:11px;color:var(--text-faint);font-weight:400;">(últimas 12 semanas)</span></div>
+    <div class="card" id="calHeatmap" style="overflow-x:auto;"></div>
+  `;
+
+  document.getElementById('calPrevMonth').addEventListener('click', ()=>{
+    calendarCursor = new Date(year, month-1, 1);
+    renderCalendarView();
+  });
+  document.getElementById('calNextMonth').addEventListener('click', ()=>{
+    calendarCursor = new Date(year, month+1, 1);
+    renderCalendarView();
+  });
+
+  const rescheduleAccept = document.getElementById('rescheduleAcceptBtn');
+  if(rescheduleAccept) rescheduleAccept.addEventListener('click', ()=>{
+    const m = missed[0];
+    Calendar.moveWorkout(m.dateKey, todayKey());
+    showToast('Treino remarcado', `${m.plan.label} movido para hoje.`, '📅');
+    renderCalendarView();
+  });
+  const rescheduleDismiss = document.getElementById('rescheduleDismissBtn');
+  if(rescheduleDismiss) rescheduleDismiss.addEventListener('click', ()=>{
+    state.rescheduleDismissed[missed[0].dateKey] = true;
+    persist();
+    renderCalendarView();
+  });
+
+  wrap.querySelectorAll('.cal-cell[data-datekey]').forEach(cell=>{
+    cell.addEventListener('click', ()=>openDayDetail(cell.dataset.datekey));
+    cell.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter' || e.key===' '){ e.preventDefault(); openDayDetail(cell.dataset.datekey); }
+    });
+    if(cell.classList.contains('cal-draggable')) attachCalendarDragHandlers(cell);
+  });
+  wrap.querySelectorAll('[data-nav]').forEach(el=>el.addEventListener('click',()=>navigate(el.dataset.nav, el.dataset.navtab)));
+
+  renderCalendarHeatmap();
+}
+
+function renderCalendarHeatmap(){
+  const el = document.getElementById('calHeatmap');
+  if(!el) return;
+  const days = Calendar.heatmapData(12);
+  const levelColor = ['var(--border)','rgba(51,85,255,.35)','rgba(51,85,255,.65)','var(--blue)'];
+  const weeks = [];
+  for(let i=0;i<days.length;i+=7) weeks.push(days.slice(i,i+7));
+  el.innerHTML = `<div class="heatmap-grid">
+    ${weeks.map(week=>`<div class="heatmap-col">
+      ${week.map(d=>`<div class="heatmap-cell" style="background:${levelColor[d.level]};" title="${fmtDate(d.dateKey)} · ${d.volume}kg"></div>`).join('')}
+    </div>`).join('')}
+  </div>`;
+}
+
+function openDayDetail(dateKey){
+  const plan = Calendar.getDayPlan(dateKey);
+  const done = !!state.completedDates[dateKey];
+  const session = state.history.find(h=>h.date===dateKey);
+  const isPast = dateKey<todayKey();
+  const isFuture = dateKey>todayKey();
+
+  if(plan.type!=='workout'){
+    const meta = Calendar.DAY_TYPE_META[plan.type]||{label:plan.label};
+    openModal(`
+      <h2 style="margin-bottom:6px;">${fmtDate(dateKey)}</h2>
+      <p style="color:var(--text-dim);font-size:13px;">${meta.label}${plan.label && plan.label!==meta.label?': '+plan.label:''}</p>
+    `);
+    return;
+  }
+
+  const tpl = plan.tpl;
+  let bodyExtra = '';
+  if(session){
+    const prsThatDay = Analytics.detectPRs().filter(pr=>pr.date===dateKey);
+    bodyExtra = `
+      <div class="chip-row" style="margin:14px 0;">
+        <span class="chip active">✔ Concluído</span>
+        <span class="chip">${session.duration} min</span>
+        <span class="chip">${session.volume}kg volume</span>
+        <span class="chip">${session.calories} kcal</span>
+      </div>
+      ${prsThatDay.length?`<div class="card" style="margin-bottom:14px;"><div class="list-row-title">🏆 Recordes nesse dia</div>${prsThatDay.map(pr=>`<p style="font-size:12.5px;color:var(--text-dim);margin-top:4px;">${pr.label}: ${pr.value}</p>`).join('')}</div>`:''}
+    `;
+  } else if(isPast){
+    bodyExtra = `<div class="chip-row" style="margin:14px 0;"><span class="chip" style="color:var(--red);border-color:var(--red);">Não realizado</span></div>`;
+  }
+
+  openModal(`
+    <h2 style="margin-bottom:4px;">${tpl.name}</h2>
+    <p style="color:var(--text-dim);font-size:13px;margin-bottom:4px;">${fmtDate(dateKey)}</p>
+    <div class="chip-row" style="margin-bottom:16px;">
+      <span class="chip">⏱ ${tpl.estimatedTime} min</span>
+      <span class="chip">📋 ${tpl.exercises.length} exercícios</span>
+    </div>
+    ${bodyExtra}
+    <div>
+      ${tpl.exercises.map(ex=>{
+        const e = findExercise(ex.exerciseId);
+        return `<div class="list-row">
+          <div class="list-row-icon">${MUSCLE_ICONS[e.muscle]}</div>
+          <div class="list-row-body">
+            <div class="list-row-title">${e.name}</div>
+            <div class="list-row-sub">${ex.sets} séries × ${ex.reps} reps ${ex.load?`· ${ex.load}kg`:''}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    ${!done && !isFuture ? `<button class="btn btn-primary btn-block" style="margin-top:10px;" id="startFromDayDetail">Iniciar treino</button>` : ''}
+  `);
+  const startBtn = document.getElementById('startFromDayDetail');
+  if(startBtn) startBtn.addEventListener('click', ()=>{
+    closeModal();
+    startCheckinFlow(plan.templateId, dateKey);
+  });
+}
+
+/* Arrastar um dia de treino pra outra célula do calendário — Pointer
+   Events (mouse e touch), mesma técnica usada no editor de treinos. */
+let calDragCtx = null;
+
+function attachCalendarDragHandlers(cell){
+  cell.addEventListener('pointerdown', (ev)=>{
+    ev.preventDefault();
+    calDragCtx = {fromKey: cell.dataset.datekey, cell};
+    cell.classList.add('cal-dragging');
+    const onMove = (e)=>{
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      const dropCell = target && target.closest('.cal-cell[data-datekey]');
+      document.querySelectorAll('.cal-drop-target').forEach(c=>c.classList.remove('cal-drop-target'));
+      if(dropCell && dropCell!==cell) dropCell.classList.add('cal-drop-target');
+    };
+    const onUp = (e)=>{
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      cell.classList.remove('cal-dragging');
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      const dropCell = target && target.closest('.cal-cell[data-datekey]');
+      document.querySelectorAll('.cal-drop-target').forEach(c=>c.classList.remove('cal-drop-target'));
+      if(dropCell && dropCell!==cell && calDragCtx){
+        const moved = Calendar.moveWorkout(calDragCtx.fromKey, dropCell.dataset.datekey);
+        if(moved){ showToast('Treino movido', 'Cronograma atualizado.', '📅'); renderCalendarView(); }
+        else showToast('Não foi possível mover', 'Esse dia já tem um treino agendado.', '⚠️');
+      }
+      calDragCtx = null;
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
 }
 
 /* ======================================================================
