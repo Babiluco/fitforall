@@ -35,6 +35,7 @@ js/sync.js           → sincronização em nuvem (mock) — app continua 100% o
 js/data.js           → dados padrão (treinos, exercícios)
 js/icons.js          → biblioteca de ícones SVG (navegação e botões)
 js/analytics.js      → sistema inteligente de progresso (recordes, tendências, platôs, resumos)
+js/calendar.js       → planejador e calendário inteligente (mês, heatmap, remarcação, arrastar treinos)
 js/timer.js          → cronômetro de descanso
 js/charts.js         → gráficos (barras, linha, anel de progresso)
 js/app.js            → lógica principal da aplicação (telas, navegação, interações)
