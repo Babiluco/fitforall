@@ -36,6 +36,8 @@ js/data.js           → dados padrão (treinos, exercícios)
 js/icons.js          → biblioteca de ícones SVG (navegação e botões)
 js/analytics.js      → sistema inteligente de progresso (recordes, tendências, platôs, resumos)
 js/calendar.js       → planejador e calendário inteligente (mês, heatmap, remarcação, arrastar treinos)
+js/photos.js         → fotos de progresso, medidas expandidas, antes/depois, marcos de transformação
+js/photos.js         → fotos de progresso, medidas expandidas, antes/depois, marcos e metas corporais
 js/timer.js          → cronômetro de descanso
 js/charts.js         → gráficos (barras, linha, anel de progresso)
 js/app.js            → lógica principal da aplicação (telas, navegação, interações)
