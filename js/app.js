@@ -1879,6 +1879,7 @@ function renderProgresso(){
   const tabs = [
     {id:'geral', label:'Visão Geral'},
     {id:'analise', label:'Análise'},
+    {id:'corpo', label:'Corpo'},
     {id:'historico', label:'Histórico'},
     {id:'conquistas', label:'Conquistas'},
   ];
@@ -1892,7 +1893,7 @@ function renderProgresso(){
   document.querySelectorAll('[data-progressotab]').forEach(btn=>{
     btn.addEventListener('click', ()=>{ currentProgressoTab=btn.dataset.progressotab; renderProgresso(); });
   });
-  const renderers = {geral: renderStats, analise: renderAnalysis, historico: renderHistory, conquistas: renderConquistas};
+  const renderers = {geral: renderStats, analise: renderAnalysis, corpo: renderBodyProgress, historico: renderHistory, conquistas: renderConquistas};
   renderers[currentProgressoTab]();
   makeInteractiveElementsAccessible(document.getElementById('progressoTabContent'));
 }
@@ -2375,9 +2376,307 @@ function renderGoalsList(){
   });
 }
 
+/* ======================================================================
+   CORPO — fotos de progresso, medidas expandidas, antes/depois,
+   gráficos, metas e linha do tempo (lógica em photos.js)
+   ====================================================================== */
+let bodyPhotoAngle = 'front';
+let bodyChartMetric = 'weight';
+let bodyChartRange = '90d';
+const ANGLE_LABELS = {front:'Frente', side:'Lado', back:'Costas', custom:'Outro'};
+
+function renderBodyProgress(){
+  const wrap = document.getElementById('progressoTabContent');
+  const newMilestones = BodyProgress.checkMilestones();
+  newMilestones.forEach(ms=>pushNotification('Marco desbloqueado!', ms.label, ms.emoji));
+  const insights = BodyProgress.bodyInsights();
+  const photos = BodyProgress.photosByAngle(bodyPhotoAngle, false);
+  const measurements = [...(state.measurements||[])].sort((a,b)=>b.date.localeCompare(a.date));
+  const goals = state.bodyGoals||[];
+
+  wrap.innerHTML = `
+    ${insights.length ? `
+      <div class="section-title" style="margin-top:0;">Insights</div>
+      <div style="margin-bottom:20px;">${insights.map(t=>`<div class="card insight-card insight-success">${t}</div>`).join('')}</div>
+    ` : ''}
+
+    <div class="section-title" style="margin-top:0;">Fotos de progresso</div>
+    <div class="chip-row" style="margin-bottom:12px;">
+      ${Object.keys(ANGLE_LABELS).map(a=>`<button class="chip ${bodyPhotoAngle===a?'active':''}" data-angle="${a}">${ANGLE_LABELS[a]}</button>`).join('')}
+    </div>
+    <div class="photo-grid" id="photoGrid">
+      <label class="photo-add-tile" for="photoUploadInput" tabindex="0" role="button" aria-label="Adicionar foto">
+        ${icon('plus',{size:22})}<span>Adicionar</span>
+      </label>
+      <input type="file" id="photoUploadInput" accept="image/*" capture="environment" style="display:none;">
+      ${photos.map(p=>`
+        <div class="photo-tile" data-photo="${p.id}">
+          <img src="${p.image}" alt="Foto de progresso — ${ANGLE_LABELS[p.angle]}, ${fmtDate(p.date)}" loading="lazy">
+          <span class="photo-date">${fmtDate(p.date)}</span>
+        </div>
+      `).join('')}
+    </div>
+    ${photos.length===0?`<p style="font-size:12.5px;color:var(--text-dim);margin:-4px 0 20px;">Nenhuma foto de "${ANGLE_LABELS[bodyPhotoAngle]}" ainda.</p>`:''}
+
+    <div class="section-title">Antes &amp; Depois</div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="field-row" style="align-items:flex-end;">
+        <div class="field" style="margin-bottom:0;"><label>Data 1</label><input type="date" id="compareDateA"></div>
+        <div class="field" style="margin-bottom:0;"><label>Data 2</label><input type="date" id="compareDateB"></div>
+      </div>
+      <button class="btn btn-primary btn-block" id="compareBtn" style="margin-top:12px;">Comparar</button>
+      <div id="compareResult"></div>
+    </div>
+
+    <div class="section-title">Medidas corporais</div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="field-row"><div class="field"><label>Peso (kg)</label><input type="number" step="0.1" id="bmWeight"></div><div class="field"><label>% Gordura</label><input type="number" step="0.1" id="bmBodyFat"></div></div>
+      <div class="field-row"><div class="field"><label>Peito (cm)</label><input type="number" step="0.5" id="bmChest"></div><div class="field"><label>Cintura (cm)</label><input type="number" step="0.5" id="bmWaist"></div></div>
+      <div class="field-row"><div class="field"><label>Quadril (cm)</label><input type="number" step="0.5" id="bmHip"></div><div class="field"><label>Ombros (cm)</label><input type="number" step="0.5" id="bmShoulders"></div></div>
+      <div class="field-row"><div class="field"><label>Pescoço (cm)</label><input type="number" step="0.5" id="bmNeck"></div><div class="field"></div></div>
+      <div class="field-row"><div class="field"><label>Braço esq. (cm)</label><input type="number" step="0.5" id="bmArmL"></div><div class="field"><label>Braço dir. (cm)</label><input type="number" step="0.5" id="bmArmR"></div></div>
+      <div class="field-row"><div class="field"><label>Antebraço esq. (cm)</label><input type="number" step="0.5" id="bmForearmL"></div><div class="field"><label>Antebraço dir. (cm)</label><input type="number" step="0.5" id="bmForearmR"></div></div>
+      <div class="field-row"><div class="field"><label>Coxa esq. (cm)</label><input type="number" step="0.5" id="bmThighL"></div><div class="field"><label>Coxa dir. (cm)</label><input type="number" step="0.5" id="bmThighR"></div></div>
+      <div class="field-row"><div class="field"><label>Panturrilha esq. (cm)</label><input type="number" step="0.5" id="bmCalfL"></div><div class="field"><label>Panturrilha dir. (cm)</label><input type="number" step="0.5" id="bmCalfR"></div></div>
+      <button class="btn btn-ghost btn-block" id="bmSaveBtn" style="margin-top:6px;">Registrar medidas de hoje</button>
+      ${measurements.length ? `
+        <div class="section-title" style="margin-top:18px;">IMC · Massa magra (mais recente)</div>
+        <div class="grid grid-2">
+          <div class="stat-card"><span class="stat-label">IMC</span><span class="stat-value" style="font-size:16px;">${BodyProgress.computeBMI(measurements[0].weight)||'—'}</span></div>
+          <div class="stat-card"><span class="stat-label">Massa magra</span><span class="stat-value" style="font-size:16px;">${BodyProgress.computeLeanMass(measurements[0].weight,measurements[0].bodyFat)||'—'}${BodyProgress.computeLeanMass(measurements[0].weight,measurements[0].bodyFat)?'kg':''}</span></div>
+        </div>
+      ` : ''}
+    </div>
+
+    <div class="section-title">Gráficos de evolução</div>
+    <div class="chip-row" style="margin-bottom:8px;">
+      ${Object.keys(BodyProgress.METRIC_LABELS).map(m=>`<button class="chip ${bodyChartMetric===m?'active':''}" data-metric="${m}">${BodyProgress.METRIC_LABELS[m]}</button>`).join('')}
+    </div>
+    <div class="chip-row" style="margin-bottom:12px;">
+      ${Object.entries({'7d':'7 dias','30d':'30 dias','90d':'90 dias','1y':'1 ano',all:'Tudo'}).map(([k,l])=>`<button class="chip ${bodyChartRange===k?'active':''}" data-range="${k}" style="font-size:11px;">${l}</button>`).join('')}
+    </div>
+    <div class="card" id="bodyChartCard" style="margin-bottom:20px;"></div>
+
+    <div class="section-title">Metas corporais</div>
+    <div style="margin-bottom:20px;">
+      ${goals.map(g=>`
+        <div class="card" style="margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span class="list-row-title">${g.label}</span>
+            <button class="icon-btn" data-delgoal2="${g.id}" style="width:32px;height:32px;" aria-label="Remover meta">${icon('trash-2',{size:14})}</button>
+          </div>
+          <div class="progress-track" style="margin-bottom:6px;"><div class="progress-fill" style="width:${BodyProgress.goalProgress(g)}%;"></div></div>
+          <p style="font-size:12px;color:var(--text-dim);">${BodyProgress.goalProgress(g)}% concluído</p>
+        </div>
+      `).join('')}
+      <button class="btn btn-ghost btn-block" id="newBodyGoalBtn">+ Nova meta corporal</button>
+    </div>
+
+    <div class="section-title">Linha do tempo</div>
+    <div id="timelineFeed"></div>
+  `;
+
+  wireBodyProgressEvents();
+  renderBodyChart();
+  renderTimelineFeed();
+}
+
+function wireBodyProgressEvents(){
+  document.querySelectorAll('[data-angle]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ bodyPhotoAngle=btn.dataset.angle; renderBodyProgress(); });
+  });
+
+  const uploadInput = document.getElementById('photoUploadInput');
+  uploadInput.addEventListener('change', async ()=>{
+    const file = uploadInput.files[0];
+    if(!file) return;
+    let angle = bodyPhotoAngle, customLabel = '';
+    if(angle==='custom'){
+      customLabel = prompt('Nome dessa foto (ex: "Pose de costas relaxado"):','')||'Personalizada';
+    }
+    showToast('Processando foto...', 'Só um instante.', '📸');
+    try{
+      const dataUrl = await BodyProgress.compressImage(file, 900, 0.72);
+      const photo = {
+        id:cryptoId(), date:todayKey(), angle, customLabel,
+        weight: state.user.weight, bodyFat: null, notes:'', image:dataUrl, hidden:false,
+      };
+      state.progressPhotos.push(photo);
+      const ok = persist();
+      if(!ok){
+        state.progressPhotos.pop();
+        showToast('Armazenamento cheio', 'Não foi possível salvar — apague fotos antigas ou libere espaço no navegador.', '⚠️');
+      } else {
+        showToast('Foto salva', 'Adicionada aos seus registros de progresso.', '✅');
+      }
+    }catch(err){
+      showToast('Erro ao processar foto', err.message||'Tente outra imagem.', '⚠️');
+    }
+    uploadInput.value = '';
+    renderBodyProgress();
+  });
+
+  document.querySelectorAll('[data-photo]').forEach(tile=>{
+    tile.addEventListener('click', ()=>openPhotoDetail(tile.dataset.photo));
+  });
+
+  document.getElementById('compareBtn').addEventListener('click', renderCompareResult);
+
+  document.getElementById('bmSaveBtn').addEventListener('click', ()=>{
+    const val = id=>{ const v=document.getElementById(id).value; return v===''?null:Number(v); };
+    const entry = {
+      date: todayKey(),
+      weight: val('bmWeight'), bodyFat: val('bmBodyFat'),
+      chest: val('bmChest'), waist: val('bmWaist'), hip: val('bmHip'),
+      shoulders: val('bmShoulders'), neck: val('bmNeck'),
+      armL: val('bmArmL'), armR: val('bmArmR'),
+      forearmL: val('bmForearmL'), forearmR: val('bmForearmR'),
+      thighL: val('bmThighL'), thighR: val('bmThighR'),
+      calfL: val('bmCalfL'), calfR: val('bmCalfR'),
+    };
+    const hasAny = Object.keys(entry).some(k=>k!=='date' && entry[k]!=null);
+    if(!hasAny){ showToast('Nada pra salvar', 'Preencha ao menos uma medida.', '⚠️'); return; }
+    state.measurements = state.measurements||[];
+    state.measurements.push(entry);
+    if(entry.weight){ state.weightLog.push({date:todayKey(), weight:entry.weight}); state.user.weight = entry.weight; }
+    persist();
+    showToast('Medidas registradas', 'Seu histórico corporal foi atualizado.', '📏');
+    renderBodyProgress();
+  });
+
+  document.querySelectorAll('[data-metric]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ bodyChartMetric=btn.dataset.metric; renderBodyProgress(); });
+  });
+  document.querySelectorAll('[data-range]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ bodyChartRange=btn.dataset.range; renderBodyProgress(); });
+  });
+
+  document.querySelectorAll('[data-delgoal2]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.bodyGoals = state.bodyGoals.filter(g=>g.id!==btn.dataset.delgoal2);
+      persist();
+      renderBodyProgress();
+    });
+  });
+  document.getElementById('newBodyGoalBtn').addEventListener('click', openNewBodyGoalModal);
+}
+
+function renderBodyChart(){
+  const card = document.getElementById('bodyChartCard');
+  if(!card) return;
+  const series = BodyProgress.metricSeries(bodyChartMetric, bodyChartRange);
+  if(series.length<2){
+    card.innerHTML = `<div class="empty-state"><span class="emoji">📈</span>Registre medidas em pelo menos 2 datas diferentes pra ver o gráfico.</div>`;
+    return;
+  }
+  renderLineChart(card, series);
+}
+
+function renderCompareResult(){
+  const dateA = document.getElementById('compareDateA').value;
+  const dateB = document.getElementById('compareDateB').value;
+  const resultEl = document.getElementById('compareResult');
+  if(!dateA || !dateB){ showToast('Escolha as duas datas', 'Selecione data 1 e data 2 pra comparar.', '⚠️'); return; }
+  const c = BodyProgress.compare(dateA, dateB);
+  function diffRow(label, val, unit){
+    if(val==null) return '';
+    const sign = val>0?'+':'';
+    const color = (label==='Peso'||label==='Cintura') ? (val<0?'var(--green)':val>0?'var(--red)':'var(--text-dim)') : 'var(--text)';
+    return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border);"><span style="font-size:12.5px;color:var(--text-dim);">${label}</span><span style="font-weight:700;color:${color};">${sign}${val}${unit}</span></div>`;
+  }
+  resultEl.innerHTML = `
+    <div class="compare-photos">
+      <div class="compare-photo-col">
+        ${c.photoA?`<img src="${c.photoA.image}" alt="Foto de ${fmtDate(dateA)}">`:`<div class="compare-photo-empty">Sem foto</div>`}
+        <span>${fmtDate(dateA)}</span>
+      </div>
+      <div class="compare-photo-col">
+        ${c.photoB?`<img src="${c.photoB.image}" alt="Foto de ${fmtDate(dateB)}">`:`<div class="compare-photo-empty">Sem foto</div>`}
+        <span>${fmtDate(dateB)}</span>
+      </div>
+    </div>
+    <p style="text-align:center;font-size:12px;color:var(--text-dim);margin:10px 0;">${c.days} dias de diferença</p>
+    ${diffRow('Peso', c.weightDiff,'kg')}
+    ${diffRow('% Gordura', c.bodyFatDiff,'%')}
+    ${diffRow('Cintura', c.waistDiff,'cm')}
+    ${diffRow('Peito', c.chestDiff,'cm')}
+    ${diffRow('Braço', c.armDiff,'cm')}
+    ${diffRow('Coxa', c.thighDiff,'cm')}
+  `;
+}
+
+function openPhotoDetail(photoId){
+  const photo = (state.progressPhotos||[]).find(p=>p.id===photoId);
+  if(!photo) return;
+  openModal(`
+    <img src="${photo.image}" alt="Foto de progresso — ${ANGLE_LABELS[photo.angle]}, ${fmtDate(photo.date)}" style="width:100%;border-radius:var(--radius);margin-bottom:14px;">
+    <p style="font-size:13px;color:var(--text-dim);">${ANGLE_LABELS[photo.angle]}${photo.customLabel?' · '+photo.customLabel:''} · ${fmtDate(photo.date)}</p>
+    ${photo.weight?`<p style="font-size:13px;margin-top:6px;">Peso na época: <b>${photo.weight}kg</b></p>`:''}
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button class="btn btn-ghost" id="hidePhotoBtn" style="flex:1;">${photo.hidden?'Reexibir':'Ocultar'}</button>
+      <button class="btn btn-danger" id="deletePhotoBtn" style="flex:1;">Excluir</button>
+    </div>
+  `);
+  document.getElementById('hidePhotoBtn').addEventListener('click', ()=>{
+    photo.hidden = !photo.hidden;
+    persist();
+    closeModal();
+    renderBodyProgress();
+  });
+  document.getElementById('deletePhotoBtn').addEventListener('click', ()=>{
+    if(!confirm('Excluir essa foto? Essa ação não pode ser desfeita.')) return;
+    state.progressPhotos = state.progressPhotos.filter(p=>p.id!==photoId);
+    persist();
+    closeModal();
+    renderBodyProgress();
+  });
+}
+
+function openNewBodyGoalModal(){
+  const metricOptions = Object.keys(BodyProgress.METRIC_LABELS).map(m=>`<option value="${m}">${BodyProgress.METRIC_LABELS[m]}</option>`).join('');
+  openModal(`
+    <h2 style="margin-bottom:16px;">Nova meta corporal</h2>
+    <div class="field"><label>O que você quer acompanhar?</label><select id="goalMetric">${metricOptions}</select></div>
+    <div class="field-row">
+      <div class="field"><label>Valor atual</label><input type="number" step="0.1" id="goalStart"></div>
+      <div class="field"><label>Meta</label><input type="number" step="0.1" id="goalTarget"></div>
+    </div>
+    <button class="btn btn-primary btn-block" id="saveGoalBtn">Criar meta</button>
+  `);
+  document.getElementById('saveGoalBtn').addEventListener('click', ()=>{
+    const metric = document.getElementById('goalMetric').value;
+    const startValue = Number(document.getElementById('goalStart').value);
+    const targetValue = Number(document.getElementById('goalTarget').value);
+    if(isNaN(startValue)||isNaN(targetValue)){ showToast('Preencha os valores', 'Informe o valor atual e a meta.', '⚠️'); return; }
+    state.bodyGoals = state.bodyGoals||[];
+    state.bodyGoals.push({
+      id:cryptoId(), metric, label:`${BodyProgress.METRIC_LABELS[metric]}: ${startValue} → ${targetValue}`,
+      startValue, targetValue, startDate:todayKey(),
+    });
+    persist();
+    closeModal();
+    showToast('Meta criada', 'Acompanhe o progresso na aba Corpo.', '🎯');
+    renderBodyProgress();
+  });
+}
+
+function renderTimelineFeed(){
+  const el = document.getElementById('timelineFeed');
+  if(!el) return;
+  const items = BodyProgress.timelineFeed().slice(0,20);
+  if(items.length===0){ el.innerHTML = `<div class="empty-state"><span class="emoji">🕓</span>Sua linha do tempo aparece aqui conforme você registra fotos e medidas.</div>`; return; }
+  el.innerHTML = items.map(item=>{
+    let icon_, text;
+    if(item.type==='photo'){ icon_='📸'; text=`Foto de progresso (${ANGLE_LABELS[item.data.angle]})`; }
+    else if(item.type==='measurement'){ icon_='📏'; text='Medidas registradas'; }
+    else if(item.type==='milestone'){ icon_=item.data.emoji; text=item.data.label; }
+    else if(item.type==='pr'){ icon_='🏆'; text=item.data.label; }
+    return `<div class="list-row"><div class="list-row-icon">${icon_}</div><div class="list-row-body"><div class="list-row-title">${text}</div><div class="list-row-sub">${fmtDate(item.date)}</div></div></div>`;
+  }).join('');
+}
+
 function renderConquistas(){
   const c = document.getElementById('progressoTabContent');
-  checkAchievements();
   c.innerHTML = `<div class="grid grid-4">
     ${ACHIEVEMENTS.map(a=>{
       const unlocked = state.unlockedAchievements.includes(a.id);
