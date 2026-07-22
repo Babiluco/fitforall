@@ -31,7 +31,10 @@ function defaultState(){
     ],
     checkins:{},                // { 'YYYY-MM-DD': moodId }
     weightLog:[],                // [{date, weight}]
-    measurements:[],             // [{date, arm, waist, hips, thigh}] — medidas corporais
+    measurements:[],             // [{date, weight, bodyFat, chest, waist, hip, shoulders, neck, armL, armR, forearmL, forearmR, thighL, thighR, calfL, calfR}] — medidas corporais (campos antigos arm/hips/thigh mantidos como legado)
+    progressPhotos:[],           // [{id, date, angle:'front'|'side'|'back'|'custom', customLabel, weight, bodyFat, notes, image(dataURL já comprimida), hidden}]
+    bodyGoals:[],                 // [{id, type, label, startValue, targetValue, unit, startDate, done}]
+    unlockedMilestones:[],        // ids de marcos de transformação já desbloqueados (ver photos.js)
     scheduleOverrides:{},        // { 'YYYY-MM-DD': {type:'workout',templateId} | {type:'rest'} | {type:'cardio'} | {type:'mobility'} | {type:'custom',label} }
     rescheduleDismissed:{},      // { 'YYYY-MM-DD': true } — dias perdidos que a pessoa já dispensou a sugestão de remarcar
     unlockedAchievements:[],
