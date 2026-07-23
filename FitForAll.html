@@ -338,6 +338,7 @@ main.view-wrap{
   cursor:pointer;transition:all .15s var(--ease);position:relative;
 }
 .cal-cell:hover{border-color:var(--accent);}
+.cal-cell:active{transform:scale(.94);}
 .cal-cell.today{border-color:var(--accent);border-width:2px;}
 .cal-empty{background:transparent;border:none;cursor:default;}
 .cal-daynum{font-size:12.5px;font-weight:600;}
@@ -362,7 +363,11 @@ main.view-wrap{
   color:var(--text-dim);font-size:11.5px;font-weight:600;cursor:pointer;min-height:44px;
 }
 .photo-add-tile:hover{border-color:var(--accent);color:var(--accent);}
-.photo-tile{position:relative;aspect-ratio:3/4;border-radius:var(--radius);overflow:hidden;cursor:pointer;background:var(--bg-card);}
+.photo-tile{position:relative;aspect-ratio:3/4;border-radius:var(--radius);overflow:hidden;cursor:pointer;background:var(--bg-card);transition:transform .15s var(--ease),box-shadow .2s var(--ease);}
+.photo-tile:hover{box-shadow:0 4px 16px rgba(0,0,0,.3);}
+.photo-tile:active{transform:scale(.96);}
+.photo-add-tile:active{transform:scale(.96);}
+.tile-spinner{width:20px;height:20px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:spin .8s linear infinite;}
 .photo-tile img{width:100%;height:100%;object-fit:cover;display:block;}
 .photo-date{
   position:absolute;bottom:0;left:0;right:0;padding:6px 8px;font-size:10.5px;font-weight:700;color:#fff;
@@ -404,8 +409,11 @@ main.view-wrap{
 .btn-success{background:var(--green);color:#fff;box-shadow:0 6px 18px rgba(34,197,94,.35);}
 .btn-success:active{transform:scale(.97);}
 .btn-danger{background:var(--red);color:#fff;}
+.btn-danger:hover{background:#f45c5c;}
+.btn-danger:active{transform:scale(.97);}
 .btn-ghost{background:var(--bg-card);border:1px solid var(--border);color:var(--text);}
 .btn-ghost:hover{background:var(--bg-card-hover);}
+.btn-ghost:active{transform:scale(.97);}
 .btn-block{width:100%;}
 .btn-sm{padding:9px 14px;font-size:12.5px;}
 .btn:disabled{opacity:.4;cursor:not-allowed;}
@@ -517,7 +525,10 @@ main.view-wrap{
 .modal-close{
   position:absolute;top:16px;right:16px;width:34px;height:34px;border-radius:50%;
   background:var(--bg-card);display:flex;align-items:center;justify-content:center;
+  transition:background .2s, transform .15s var(--ease);
 }
+.modal-close:hover{background:var(--bg-card-hover);}
+.modal-close:active{transform:scale(.92);}
 
 /* Full-screen workout runner */
 .runner{
@@ -644,6 +655,8 @@ main.view-wrap{
 
 /* Forms */
 .field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;min-width:0;}
+.field.invalid input,.field.invalid select{border-color:var(--red);}
+.field-error{font-size:11.5px;color:var(--red);font-weight:600;margin-top:-2px;}
 .field label{font-size:12.5px;font-weight:600;color:var(--text-dim);}
 .field input,.field select,.field textarea{
   width:100%;
@@ -2375,7 +2388,8 @@ const BodyProgress = (function(){
   /* Metas corporais                                                     */
   /* ------------------------------------------------------------------ */
   function goalProgress(goal){
-    const current = goal.metric ? (METRIC_GETTERS[goal.metric]?.(closestMeasurementTo(todayKey()))||goal.startValue) : goal.startValue;
+    const latestMeasurement = closestMeasurementTo(todayKey());
+    const current = (goal.metric && latestMeasurement) ? (METRIC_GETTERS[goal.metric]?.(latestMeasurement) ?? goal.startValue) : goal.startValue;
     const total = goal.targetValue-goal.startValue;
     if(total===0) return 100;
     const done = current-goal.startValue;
@@ -4750,12 +4764,18 @@ function openQuickWeightModal(){
   openModal(`
     <h2 style="margin-bottom:4px;">Registrar peso</h2>
     <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px;">Peso atual: ${state.user.weight}kg</p>
-    <div class="field"><label>Novo peso (kg)</label><input type="number" step="0.1" id="quickWeightInput" value="${state.user.weight}" autofocus></div>
+    <div class="field" id="quickWeightField"><label>Novo peso (kg)</label><input type="number" step="0.1" id="quickWeightInput" value="${state.user.weight}" autofocus></div>
     <button class="btn btn-primary btn-block" id="quickWeightSave">Salvar</button>
   `);
   document.getElementById('quickWeightSave').addEventListener('click', ()=>{
+    const field = document.getElementById('quickWeightField');
     const w = Number(document.getElementById('quickWeightInput').value);
-    if(!w || w<=0){ showToast('Peso inválido', 'Informe um valor de peso válido.', '⚠️'); return; }
+    field.querySelector('.field-error')?.remove();
+    if(!w || w<=0){
+      field.classList.add('invalid');
+      field.insertAdjacentHTML('beforeend', `<span class="field-error">Informe um peso válido, maior que zero.</span>`);
+      return;
+    }
     state.weightLog.push({date:todayKey(), weight:w});
     state.user.weight = w;
     persist();
@@ -4941,7 +4961,7 @@ function renderGoalsList(){
     <div class="list-row goal-row ${g.done?'done':''}">
       <div class="goal-check" data-toggle="${g.id}" style="cursor:pointer;">${g.done?'✓':''}</div>
       <div class="list-row-body"><div class="list-row-title">${escapeHtml(g.text)}</div></div>
-      <button class="icon-btn" data-delgoal="${g.id}" aria-label="Remover meta" style="width:32px;height:32px;">${icon('trash-2',{size:14})}</button>
+      <button class="icon-btn" data-delgoal="${g.id}" aria-label="Remover meta">${icon('trash-2',{size:15})}</button>
     </div>`).join('');
   list.querySelectorAll('[data-toggle]').forEach(el=>{
     el.addEventListener('click', ()=>{
@@ -5043,7 +5063,7 @@ function renderBodyProgress(){
         <div class="card" style="margin-bottom:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <span class="list-row-title">${g.label}</span>
-            <button class="icon-btn" data-delgoal2="${g.id}" style="width:32px;height:32px;" aria-label="Remover meta">${icon('trash-2',{size:14})}</button>
+            <button class="icon-btn" data-delgoal2="${g.id}" aria-label="Remover meta">${icon('trash-2',{size:15})}</button>
           </div>
           <div class="progress-track" style="margin-bottom:6px;"><div class="progress-fill" style="width:${BodyProgress.goalProgress(g)}%;"></div></div>
           <p style="font-size:12px;color:var(--text-dim);">${BodyProgress.goalProgress(g)}% concluído</p>
@@ -5074,7 +5094,9 @@ function wireBodyProgressEvents(){
     if(angle==='custom'){
       customLabel = prompt('Nome dessa foto (ex: "Pose de costas relaxado"):','')||'Personalizada';
     }
-    showToast('Processando foto...', 'Só um instante.', '📸');
+    const tile = document.querySelector('.photo-add-tile');
+    const tileOriginalHtml = tile ? tile.innerHTML : '';
+    if(tile){ tile.innerHTML = `<div class="tile-spinner"></div><span>Processando...</span>`; tile.style.pointerEvents='none'; }
     try{
       const dataUrl = await BodyProgress.compressImage(file, 900, 0.72);
       const photo = {
@@ -5091,6 +5113,7 @@ function wireBodyProgressEvents(){
       }
     }catch(err){
       showToast('Erro ao processar foto', err.message||'Tente outra imagem.', '⚠️');
+      if(tile){ tile.innerHTML = tileOriginalHtml; tile.style.pointerEvents=''; }
     }
     uploadInput.value = '';
     renderBodyProgress();
@@ -5218,8 +5241,8 @@ function openNewBodyGoalModal(){
     <h2 style="margin-bottom:16px;">Nova meta corporal</h2>
     <div class="field"><label>O que você quer acompanhar?</label><select id="goalMetric">${metricOptions}</select></div>
     <div class="field-row">
-      <div class="field"><label>Valor atual</label><input type="number" step="0.1" id="goalStart"></div>
-      <div class="field"><label>Meta</label><input type="number" step="0.1" id="goalTarget"></div>
+      <div class="field" id="goalStartField"><label>Valor atual</label><input type="number" step="0.1" id="goalStart"></div>
+      <div class="field" id="goalTargetField"><label>Meta</label><input type="number" step="0.1" id="goalTarget"></div>
     </div>
     <button class="btn btn-primary btn-block" id="saveGoalBtn">Criar meta</button>
   `);
@@ -5227,7 +5250,21 @@ function openNewBodyGoalModal(){
     const metric = document.getElementById('goalMetric').value;
     const startValue = Number(document.getElementById('goalStart').value);
     const targetValue = Number(document.getElementById('goalTarget').value);
-    if(isNaN(startValue)||isNaN(targetValue)){ showToast('Preencha os valores', 'Informe o valor atual e a meta.', '⚠️'); return; }
+    const startField = document.getElementById('goalStartField');
+    const targetField = document.getElementById('goalTargetField');
+    [startField, targetField].forEach(f=>{ f.classList.remove('invalid'); f.querySelector('.field-error')?.remove(); });
+    let hasError = false;
+    if(document.getElementById('goalStart').value===''||isNaN(startValue)){
+      startField.classList.add('invalid');
+      startField.insertAdjacentHTML('beforeend', `<span class="field-error">Obrigatório</span>`);
+      hasError = true;
+    }
+    if(document.getElementById('goalTarget').value===''||isNaN(targetValue)){
+      targetField.classList.add('invalid');
+      targetField.insertAdjacentHTML('beforeend', `<span class="field-error">Obrigatório</span>`);
+      hasError = true;
+    }
+    if(hasError) return;
     state.bodyGoals = state.bodyGoals||[];
     state.bodyGoals.push({
       id:cryptoId(), metric, label:`${BodyProgress.METRIC_LABELS[metric]}: ${startValue} → ${targetValue}`,
