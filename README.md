@@ -15,8 +15,6 @@ App pessoal de acompanhamento de treinos: organize sua semana de treino, acompan
 
 Basta abrir o arquivo `index.html` num navegador (de preferência **Chrome**). Não precisa de servidor nem instalação.
 
-Se preferir um único arquivo (sem pastas), use o `FitForAll.html` — ele já tem tudo embutido. Só o ícone personalizado do PWA não funciona nessa versão (precisa da pasta `icons/` e do `manifest.json` ao lado, que só existem na versão com pastas).
-
 ## 📁 Estrutura
 
 ```
@@ -41,7 +39,6 @@ js/photos.js         → fotos de progresso, medidas expandidas, antes/depois, m
 js/timer.js          → cronômetro de descanso
 js/charts.js         → gráficos (barras, linha, anel de progresso)
 js/app.js            → lógica principal da aplicação (telas, navegação, interações)
-FitForAll.html        → versão única, tudo embutido (alternativa ao index.html + pastas)
 ```
 
 ## 🏗️ Arquitetura (preparado pra crescer)
