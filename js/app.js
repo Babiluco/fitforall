@@ -2170,12 +2170,18 @@ function openQuickWeightModal(){
   openModal(`
     <h2 style="margin-bottom:4px;">Registrar peso</h2>
     <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px;">Peso atual: ${state.user.weight}kg</p>
-    <div class="field"><label>Novo peso (kg)</label><input type="number" step="0.1" id="quickWeightInput" value="${state.user.weight}" autofocus></div>
+    <div class="field" id="quickWeightField"><label>Novo peso (kg)</label><input type="number" step="0.1" id="quickWeightInput" value="${state.user.weight}" autofocus></div>
     <button class="btn btn-primary btn-block" id="quickWeightSave">Salvar</button>
   `);
   document.getElementById('quickWeightSave').addEventListener('click', ()=>{
+    const field = document.getElementById('quickWeightField');
     const w = Number(document.getElementById('quickWeightInput').value);
-    if(!w || w<=0){ showToast('Peso inválido', 'Informe um valor de peso válido.', '⚠️'); return; }
+    field.querySelector('.field-error')?.remove();
+    if(!w || w<=0){
+      field.classList.add('invalid');
+      field.insertAdjacentHTML('beforeend', `<span class="field-error">Informe um peso válido, maior que zero.</span>`);
+      return;
+    }
     state.weightLog.push({date:todayKey(), weight:w});
     state.user.weight = w;
     persist();
@@ -2361,7 +2367,7 @@ function renderGoalsList(){
     <div class="list-row goal-row ${g.done?'done':''}">
       <div class="goal-check" data-toggle="${g.id}" style="cursor:pointer;">${g.done?'✓':''}</div>
       <div class="list-row-body"><div class="list-row-title">${escapeHtml(g.text)}</div></div>
-      <button class="icon-btn" data-delgoal="${g.id}" aria-label="Remover meta" style="width:32px;height:32px;">${icon('trash-2',{size:14})}</button>
+      <button class="icon-btn" data-delgoal="${g.id}" aria-label="Remover meta">${icon('trash-2',{size:15})}</button>
     </div>`).join('');
   list.querySelectorAll('[data-toggle]').forEach(el=>{
     el.addEventListener('click', ()=>{
@@ -2463,7 +2469,7 @@ function renderBodyProgress(){
         <div class="card" style="margin-bottom:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <span class="list-row-title">${g.label}</span>
-            <button class="icon-btn" data-delgoal2="${g.id}" style="width:32px;height:32px;" aria-label="Remover meta">${icon('trash-2',{size:14})}</button>
+            <button class="icon-btn" data-delgoal2="${g.id}" aria-label="Remover meta">${icon('trash-2',{size:15})}</button>
           </div>
           <div class="progress-track" style="margin-bottom:6px;"><div class="progress-fill" style="width:${BodyProgress.goalProgress(g)}%;"></div></div>
           <p style="font-size:12px;color:var(--text-dim);">${BodyProgress.goalProgress(g)}% concluído</p>
@@ -2494,7 +2500,9 @@ function wireBodyProgressEvents(){
     if(angle==='custom'){
       customLabel = prompt('Nome dessa foto (ex: "Pose de costas relaxado"):','')||'Personalizada';
     }
-    showToast('Processando foto...', 'Só um instante.', '📸');
+    const tile = document.querySelector('.photo-add-tile');
+    const tileOriginalHtml = tile ? tile.innerHTML : '';
+    if(tile){ tile.innerHTML = `<div class="tile-spinner"></div><span>Processando...</span>`; tile.style.pointerEvents='none'; }
     try{
       const dataUrl = await BodyProgress.compressImage(file, 900, 0.72);
       const photo = {
@@ -2511,6 +2519,7 @@ function wireBodyProgressEvents(){
       }
     }catch(err){
       showToast('Erro ao processar foto', err.message||'Tente outra imagem.', '⚠️');
+      if(tile){ tile.innerHTML = tileOriginalHtml; tile.style.pointerEvents=''; }
     }
     uploadInput.value = '';
     renderBodyProgress();
@@ -2638,8 +2647,8 @@ function openNewBodyGoalModal(){
     <h2 style="margin-bottom:16px;">Nova meta corporal</h2>
     <div class="field"><label>O que você quer acompanhar?</label><select id="goalMetric">${metricOptions}</select></div>
     <div class="field-row">
-      <div class="field"><label>Valor atual</label><input type="number" step="0.1" id="goalStart"></div>
-      <div class="field"><label>Meta</label><input type="number" step="0.1" id="goalTarget"></div>
+      <div class="field" id="goalStartField"><label>Valor atual</label><input type="number" step="0.1" id="goalStart"></div>
+      <div class="field" id="goalTargetField"><label>Meta</label><input type="number" step="0.1" id="goalTarget"></div>
     </div>
     <button class="btn btn-primary btn-block" id="saveGoalBtn">Criar meta</button>
   `);
@@ -2647,7 +2656,21 @@ function openNewBodyGoalModal(){
     const metric = document.getElementById('goalMetric').value;
     const startValue = Number(document.getElementById('goalStart').value);
     const targetValue = Number(document.getElementById('goalTarget').value);
-    if(isNaN(startValue)||isNaN(targetValue)){ showToast('Preencha os valores', 'Informe o valor atual e a meta.', '⚠️'); return; }
+    const startField = document.getElementById('goalStartField');
+    const targetField = document.getElementById('goalTargetField');
+    [startField, targetField].forEach(f=>{ f.classList.remove('invalid'); f.querySelector('.field-error')?.remove(); });
+    let hasError = false;
+    if(document.getElementById('goalStart').value===''||isNaN(startValue)){
+      startField.classList.add('invalid');
+      startField.insertAdjacentHTML('beforeend', `<span class="field-error">Obrigatório</span>`);
+      hasError = true;
+    }
+    if(document.getElementById('goalTarget').value===''||isNaN(targetValue)){
+      targetField.classList.add('invalid');
+      targetField.insertAdjacentHTML('beforeend', `<span class="field-error">Obrigatório</span>`);
+      hasError = true;
+    }
+    if(hasError) return;
     state.bodyGoals = state.bodyGoals||[];
     state.bodyGoals.push({
       id:cryptoId(), metric, label:`${BodyProgress.METRIC_LABELS[metric]}: ${startValue} → ${targetValue}`,
