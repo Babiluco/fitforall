@@ -226,7 +226,8 @@ const BodyProgress = (function(){
   /* Metas corporais                                                     */
   /* ------------------------------------------------------------------ */
   function goalProgress(goal){
-    const current = goal.metric ? (METRIC_GETTERS[goal.metric]?.(closestMeasurementTo(todayKey()))||goal.startValue) : goal.startValue;
+    const latestMeasurement = closestMeasurementTo(todayKey());
+    const current = (goal.metric && latestMeasurement) ? (METRIC_GETTERS[goal.metric]?.(latestMeasurement) ?? goal.startValue) : goal.startValue;
     const total = goal.targetValue-goal.startValue;
     if(total===0) return 100;
     const done = current-goal.startValue;
