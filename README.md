@@ -63,4 +63,4 @@ O app salva o progresso no `localStorage` do navegador — ou seja, os dados fic
 
 ## 🎨 Estilo
 
-Paleta escura com gradiente azul → roxo e tipografia Poppins, seguindo o design system e os ícones oficiais do FitForAll.
+Paleta escura com gradiente azul → roxo e tipografia Poppins, seguindo o design system e os ícones oficiais do FitForAll. 
