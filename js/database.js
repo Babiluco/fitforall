@@ -86,4 +86,4 @@ const DB = {
       level: levelFromXp(state.xp||0),
     };
   },
-};
+}; 
