@@ -31,4 +31,4 @@ const AUTH = {
     log('[Auth mock] refreshSession()');
     return {ok:true, mock:true};
   },
-};
+}; 
