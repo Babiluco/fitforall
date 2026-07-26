@@ -69,4 +69,4 @@ function renderRing(container, percent, label){
   requestAnimationFrame(()=>{
     container.querySelector('.fg').style.strokeDashoffset = offset;
   });
-}
+} 
