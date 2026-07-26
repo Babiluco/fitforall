@@ -933,7 +933,7 @@ function renderEditorExercises(templateId){
         <div class="list-row-body">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
             <div class="list-row-title">${e?e.name:ex.exerciseId}</div>
-            <button class="icon-btn" data-remove-idx="${i}" title="Remover" aria-label="Remover exercício" style="width:32px;height:32px;flex-shrink:0;">${icon('trash-2',{size:15})}</button>
+            <button class="icon-btn" data-remove-idx="${i}" title="Remover" aria-label="Remover exercício" style="flex-shrink:0;">${icon('trash-2',{size:16})}</button>
           </div>
           <div class="field-row" style="margin-top:10px;">
             <div class="field" style="margin-bottom:0;"><label>Séries</label><input type="number" min="1" data-idx="${i}" data-key="sets" value="${ex.sets}"></div>
