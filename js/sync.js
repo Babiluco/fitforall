@@ -29,4 +29,4 @@ const SYNC = {
     log('[Sync mock] syncMeasurements');
     return {ok:true, synced:false, mock:true};
   },
-};
+}; 
