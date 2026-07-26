@@ -69,4 +69,4 @@ const RestTimer = (function(){
   function getTotal(){ return total; }
 
   return {start, stop, pause, resume, isRunning, getRemaining, getTotal};
-})(); 
+})();
