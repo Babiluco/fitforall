@@ -116,4 +116,4 @@ Nunca misturar as duas famílias pro **mesmo tipo de elemento** (ex.: não usar 
 Toda transição usa a mesma curva (`--ease: cubic-bezier(.22,1,.36,1)`), pra manter o "peso" do movimento consistente. Padrão:
 - Hover: muda cor/fundo, ~0.2s
 - Toque (`:active`): `transform:scale(.92–.97)`, ~0.15s — presente em **todo** elemento clicável desde esta auditoria
-- Entrada de tela cheia (runner, overlay de descanso): `translateY`, 0.3–0.4s
+- Entrada de tela cheia (runner, overlay de descanso): `translateY`, 0.3–0.4s 
