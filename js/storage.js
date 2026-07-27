@@ -37,6 +37,7 @@ function defaultState(){
     unlockedMilestones:[],        // ids de marcos de transformação já desbloqueados (ver photos.js)
     scheduleOverrides:{},        // { 'YYYY-MM-DD': {type:'workout',templateId} | {type:'rest'} | {type:'cardio'} | {type:'mobility'} | {type:'custom',label} }
     rescheduleDismissed:{},      // { 'YYYY-MM-DD': true } — dias perdidos que a pessoa já dispensou a sugestão de remarcar
+    activeWorkoutSession:null,   // treino em andamento (sobrevive a fechar o app/navegador) — ver openRunner/persistRunnerSession em app.js
     unlockedAchievements:[],
     fullWeeksCompleted:0,
     xp:0,                        // pontos de experiência (gamificação)
