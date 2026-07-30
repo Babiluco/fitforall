@@ -1256,10 +1256,12 @@ function openRunner(templateId, dateKey, mood){
   const tpl = getTemplate(templateId);
   const loadMultiplier = (mood==='tired')?0.9:(mood==='exhausted')?0.8:1;
   runnerCtx = {
+    id: cryptoId(),
     templateId, dateKey, mood,
     exIndex:0,
     startTime:Date.now(),
     lastCompleted:null, // {exIndex,setIndex} — pra permitir desfazer a última série marcada
+    restState:null,      // {endsAt(timestamp), totalSeconds, paused, pausedRemaining} — null quando não tá descansando
     sets: tpl.exercises.map(ex=>{
       const n = ex.sets||1;
       // Sugestão de carga: usa o último peso registrado desse exercício
@@ -1283,6 +1285,49 @@ function openRunner(templateId, dateKey, mood){
   requestAnimationFrame(()=>document.getElementById('runnerEl').classList.add('open'));
   renderRunnerExercise();
   startRunnerClock();
+  persistRunnerSession(); // já salva assim que o treino começa — sobrevive mesmo se sair antes da 1ª série
+}
+
+/* ======================================================================
+   PERSISTÊNCIA DO TREINO EM ANDAMENTO — sobrevive a fechar o app,
+   recarregar a página, trocar de app ou o sistema encerrar o PWA.
+   ======================================================================
+   O treino ativo vive só na memória (runnerCtx) igual antes, mas agora
+   TODA mudança relevante também é escrita em state.activeWorkoutSession
+   e salva no localStorage (via persist(), a mesma função que o resto do
+   app já usa) — sem inventar um caminho de armazenamento paralelo. */
+function persistRunnerSession(){
+  if(!runnerCtx) return;
+  state.activeWorkoutSession = {
+    id: runnerCtx.id,
+    templateId: runnerCtx.templateId,
+    dateKey: runnerCtx.dateKey,
+    mood: runnerCtx.mood,
+    status: 'active',
+    startedAt: runnerCtx.startTime,
+    exIndex: runnerCtx.exIndex,
+    sets: runnerCtx.sets,
+    lastCompleted: runnerCtx.lastCompleted,
+    restState: runnerCtx.restState,
+  };
+  persist();
+}
+
+/* Confere se uma sessão salva tem o formato mínimo esperado antes de
+   confiar nela — dado corrompido vira "sem treino ativo" em vez de
+   quebrar o app. */
+function isValidActiveSession(s){
+  if(!s || typeof s!=='object') return false;
+  if(s.status!=='active') return false;
+  if(!s.templateId || !Array.isArray(s.sets)) return false;
+  if(!getTemplate(s.templateId)) return false;
+  return true;
+}
+
+function discardActiveSession(){
+  if(state.activeWorkoutSession) state.activeWorkoutSession.status = 'discarded';
+  state.activeWorkoutSession = null;
+  persist();
 }
 
 /* Relógio do treino: atualiza só o texto do cabeçalho a cada segundo, sem
@@ -1378,7 +1423,10 @@ function renderRunnerExercise(){
   `;
 
   document.getElementById('runnerClose').addEventListener('click', ()=>{
-    if(confirm('Sair do treino? Seu progresso nesta sessão será perdido.')) closeRunner();
+    if(confirm('Sair do treino? Seu progresso nesta sessão será perdido.')){
+      discardActiveSession();
+      closeRunner();
+    }
   });
   document.getElementById('runnerRestBtn').addEventListener('click', ()=>openRestTimerPicker(exDef.rest||60));
   document.getElementById('showInfoBtn').addEventListener('click', ()=>openExerciseModal(e.id));
@@ -1387,6 +1435,7 @@ function renderRunnerExercise(){
     inp.addEventListener('input', ()=>{
       const i = Number(inp.dataset.set);
       setsArr[i][inp.dataset.field] = Number(inp.value)||0;
+      debouncedPersistRunnerSession();
     });
   });
   runnerEl.querySelectorAll('[data-check]').forEach(btn=>{
@@ -1397,6 +1446,7 @@ function renderRunnerExercise(){
         runnerCtx.lastCompleted = {exIndex:runnerCtx.exIndex, setIndex:i};
         openRestTimerPicker(exDef.rest||60, true);
       }
+      persistRunnerSession(); // dado crítico (série concluída) — nunca fica no debounce
       renderRunnerExercise();
     });
   });
@@ -1405,6 +1455,7 @@ function renderRunnerExercise(){
       const i = Number(btn.dataset.skip);
       setsArr[i].skipped = true;
       setsArr[i].done = false;
+      persistRunnerSession();
       renderRunnerExercise();
     });
   });
@@ -1412,6 +1463,7 @@ function renderRunnerExercise(){
     btn.addEventListener('click', ()=>{
       const i = Number(btn.dataset.unskip);
       setsArr[i].skipped = false;
+      persistRunnerSession();
       renderRunnerExercise();
     });
   });
@@ -1423,10 +1475,21 @@ function renderRunnerExercise(){
   updateRunnerClock();
 }
 
+/* Peso/reps mudam a cada tecla digitada — salvar a cada toque seria
+   excessivo, então essas escritas usam um pequeno atraso (debounce).
+   Ações críticas (marcar/pular série) NUNCA passam por aqui — são
+   sempre salvas na hora, direto em persistRunnerSession(). */
+let runnerSaveDebounce = null;
+function debouncedPersistRunnerSession(){
+  clearTimeout(runnerSaveDebounce);
+  runnerSaveDebounce = setTimeout(persistRunnerSession, 500);
+}
+
 function goToNextExercise(){
   const tpl = getTemplate(runnerCtx.templateId);
   if(runnerCtx.exIndex < tpl.exercises.length-1){
     runnerCtx.exIndex++;
+    persistRunnerSession();
     renderRunnerExercise();
     const scrollArea = document.getElementById('runnerScrollArea');
     if(scrollArea) scrollArea.scrollTop = 0;
@@ -1480,13 +1543,23 @@ const REST_MOTIVATION = [
   'Consistência vence intensidade.',
 ];
 
-function startRestOverlay(seconds){
+function startRestOverlay(seconds, existingEndsAt){
   removeTimerFab();
   const next = getRestNextLabel();
   const showMotivation = Math.random()<0.5;
   const motivation = REST_MOTIVATION[Math.floor(Math.random()*REST_MOTIVATION.length)];
   const canUndo = !!runnerCtx.lastCompleted;
   const circumference = 2*Math.PI*90;
+
+  // Fonte da verdade é o RELÓGIO (timestamp de término), não uma contagem
+  // regressiva em memória — assim o tempo continua certo mesmo se o app
+  // ficar em segundo plano (o navegador pode atrasar o setInterval, mas
+  // recalculamos a partir de endsAt a cada tique, então se autocorrige).
+  const endsAt = existingEndsAt || (Date.now() + seconds*1000);
+  const initialRemaining = Math.max(0, Math.round((endsAt-Date.now())/1000));
+  runnerCtx.restState = {endsAt, totalSeconds:seconds, paused:false, pausedRemaining:null};
+  persistRunnerSession();
+
   const overlay = document.createElement('div');
   overlay.className = 'rest-overlay';
   overlay.id = 'restOverlay';
@@ -1498,7 +1571,7 @@ function startRestOverlay(seconds){
           <circle class="rest-ring-bg" cx="100" cy="100" r="90"></circle>
           <circle class="rest-ring-fg" id="restRingFg" cx="100" cy="100" r="90" stroke-dasharray="${circumference}" stroke-dashoffset="0"></circle>
         </svg>
-        <div class="rest-time" id="restTimeLabel" role="button" tabindex="0" title="Toque pra editar">${seconds}</div>
+        <div class="rest-time" id="restTimeLabel" role="button" tabindex="0" title="Toque pra editar">${initialRemaining}</div>
       </div>
       <p class="rest-edit-hint">Toque no número pra editar</p>
       <div class="rest-next">
@@ -1522,12 +1595,13 @@ function startRestOverlay(seconds){
 
   const timeBox = overlay.querySelector('.rest-ring');
 
-  function onTick(rem, total){
-    const clamped = Math.max(0, rem);
+  function onTick(){
+    if(!runnerCtx || !runnerCtx.restState) return;
+    const clamped = Math.max(0, Math.round((runnerCtx.restState.endsAt-Date.now())/1000));
     const label = document.getElementById('restTimeLabel');
     if(label) label.textContent = clamped;
     const currentRing = document.getElementById('restRingFg');
-    if(currentRing) currentRing.style.strokeDashoffset = circumference * (1 - clamped/Math.max(total,1));
+    if(currentRing) currentRing.style.strokeDashoffset = circumference * (1 - clamped/Math.max(runnerCtx.restState.totalSeconds,1));
   }
   function onDone(){
     const label = document.getElementById('restTimeLabel');
@@ -1537,23 +1611,35 @@ function startRestOverlay(seconds){
   }
   function restartAt(newSeconds){
     newSeconds = Math.max(1, Math.round(newSeconds));
+    runnerCtx.restState = {endsAt: Date.now()+newSeconds*1000, totalSeconds:newSeconds, paused:false, pausedRemaining:null};
+    persistRunnerSession();
     RestTimer.start(newSeconds, onTick, onDone);
   }
 
-  RestTimer.start(seconds, onTick, onDone);
+  if(initialRemaining<=0){ onDone(); }
+  else RestTimer.start(initialRemaining, onTick, onDone);
 
   overlay.querySelector('#restSkipBtn').addEventListener('click', closeRestOverlay);
-  overlay.querySelector('#restAdd15').addEventListener('click', ()=>restartAt(RestTimer.getRemaining()+15));
-  overlay.querySelector('#restMinus15').addEventListener('click', ()=>restartAt(RestTimer.getRemaining()-15));
+  overlay.querySelector('#restAdd15').addEventListener('click', ()=>restartAt(Math.round((runnerCtx.restState.endsAt-Date.now())/1000)+15));
+  overlay.querySelector('#restMinus15').addEventListener('click', ()=>restartAt(Math.round((runnerCtx.restState.endsAt-Date.now())/1000)-15));
 
   const pauseBtn = overlay.querySelector('#restPauseBtn');
   pauseBtn.addEventListener('click', ()=>{
     if(RestTimer.isRunning()){
       RestTimer.pause();
+      const remaining = Math.max(0, Math.round((runnerCtx.restState.endsAt-Date.now())/1000));
+      runnerCtx.restState.paused = true;
+      runnerCtx.restState.pausedRemaining = remaining;
+      persistRunnerSession();
       pauseBtn.innerHTML = icon('check',{size:16}); // reaproveita um ícone claro de "retomar"
       pauseBtn.setAttribute('aria-label','Retomar cronômetro');
       overlay.classList.add('paused');
     } else {
+      const remaining = runnerCtx.restState.pausedRemaining||0;
+      runnerCtx.restState.endsAt = Date.now()+remaining*1000;
+      runnerCtx.restState.paused = false;
+      runnerCtx.restState.pausedRemaining = null;
+      persistRunnerSession();
       RestTimer.resume();
       pauseBtn.innerHTML = icon('clock',{size:16});
       pauseBtn.setAttribute('aria-label','Pausar cronômetro');
@@ -1566,7 +1652,7 @@ function startRestOverlay(seconds){
 
   function enterEditMode(){
     RestTimer.stop();
-    const current = RestTimer.getRemaining() || seconds;
+    const current = Math.max(0, Math.round((runnerCtx.restState.endsAt-Date.now())/1000)) || seconds;
     timeBox.innerHTML = `
       <svg viewBox="0 0 200 200">
         <circle class="rest-ring-bg" cx="100" cy="100" r="90"></circle>
@@ -1589,12 +1675,13 @@ function startRestOverlay(seconds){
   }
 
   function rebuildRing(){
+    const remaining = Math.max(0, Math.round((runnerCtx.restState.endsAt-Date.now())/1000));
     timeBox.innerHTML = `
       <svg viewBox="0 0 200 200">
         <circle class="rest-ring-bg" cx="100" cy="100" r="90"></circle>
         <circle class="rest-ring-fg" id="restRingFg" cx="100" cy="100" r="90" stroke-dasharray="${circumference}" stroke-dashoffset="0"></circle>
       </svg>
-      <div class="rest-time" id="restTimeLabel" role="button" tabindex="0" title="Toque pra editar">${RestTimer.getRemaining()}</div>
+      <div class="rest-time" id="restTimeLabel" role="button" tabindex="0" title="Toque pra editar">${remaining}</div>
     `;
     timeBox.querySelector('#restTimeLabel').addEventListener('click', enterEditMode);
   }
