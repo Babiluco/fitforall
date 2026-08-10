@@ -1,72 +1,159 @@
+```javascript
 /* ==========================================================================
    FitForAll — Cronômetro de descanso
    ========================================================================== */
 
-const RestTimer = (function(){
+const RestTimer = (function () {
   let remaining = 0;
   let total = 0;
   let intervalId = null;
   let onTick = null;
   let onDone = null;
 
-  function beep(){
-    try{
-      const ctx = new (window.AudioContext||window.webkitAudioContext)();
-      [0,0.18,0.36].forEach((t,i)=>{
-        const osc = ctx.createOscillator();
+  // Emite três sons ao finalizar o descanso
+  function beep() {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+
+      if (!AudioContext) return;
+
+      const ctx = new AudioContext();
+
+      [0, 0.18, 0.36].forEach((time, index) => {
+        const oscillator = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.type='sine';
-        osc.frequency.value = i===2?880:660;
-        gain.gain.setValueAtTime(0.0001, ctx.currentTime+t);
-        gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime+t+0.01);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+t+0.16);
-        osc.connect(gain).connect(ctx.destination);
-        osc.start(ctx.currentTime+t);
-        osc.stop(ctx.currentTime+t+0.18);
+
+        oscillator.type = "sine";
+        oscillator.frequency.value = index === 2 ? 880 : 660;
+
+        gain.gain.setValueAtTime(
+          0.0001,
+          ctx.currentTime + time
+        );
+
+        gain.gain.exponentialRampToValueAtTime(
+          0.25,
+          ctx.currentTime + time + 0.01
+        );
+
+        gain.gain.exponentialRampToValueAtTime(
+          0.0001,
+          ctx.currentTime + time + 0.16
+        );
+
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+
+        oscillator.start(ctx.currentTime + time);
+        oscillator.stop(ctx.currentTime + time + 0.18);
       });
-    }catch(e){ /* audio not available */ }
+
+      // Libera o contexto de áudio depois dos sons
+      setTimeout(() => {
+        ctx.close();
+      }, 1000);
+
+    } catch (error) {
+      // Áudio indisponível — não interrompe o cronômetro
+    }
   }
 
-  function start(seconds, tickCb, doneCb){
-    stop();
-    remaining = seconds;
-    total = seconds;
-    onTick = tickCb;
-    onDone = doneCb;
-    if(onTick) onTick(remaining, total);
-    intervalId = setInterval(()=>{
-      remaining--;
-      if(onTick) onTick(remaining, total);
-      if(remaining<=0){
-        stop();
-        beep();
-        if(onDone) onDone();
+  // Executa cada segundo enquanto o cronômetro estiver ativo
+  function tick() {
+    remaining--;
+
+    if (remaining < 0) {
+      remaining = 0;
+    }
+
+    if (onTick) {
+      onTick(remaining, total);
+    }
+
+    if (remaining === 0) {
+      clearTimer();
+      beep();
+
+      if (onDone) {
+        onDone();
       }
-    },1000);
+    }
   }
 
-  function stop(){
-    if(intervalId){ clearInterval(intervalId); intervalId=null; }
+  // Inicia o intervalo
+  function startTimer() {
+    if (intervalId !== null) return;
+
+    intervalId = setInterval(tick, 1000);
   }
 
-  function pause(){ stop(); } // stop() já preserva remaining/total — pausar é só isso
-
-  function resume(){
-    if(intervalId || remaining<=0) return;
-    intervalId = setInterval(()=>{
-      remaining--;
-      if(onTick) onTick(remaining, total);
-      if(remaining<=0){
-        stop();
-        beep();
-        if(onDone) onDone();
-      }
-    },1000);
+  // Limpa apenas o intervalo, preservando o tempo restante
+  function clearTimer() {
+    if (intervalId !== null) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
   }
 
-  function isRunning(){ return intervalId !== null; }
-  function getRemaining(){ return remaining; }
-  function getTotal(){ return total; }
+  function start(seconds, tickCb, doneCb) {
+    clearTimer();
 
-  return {start, stop, pause, resume, isRunning, getRemaining, getTotal};
+    remaining = Math.max(0, Number(seconds) || 0);
+    total = remaining;
+
+    onTick = typeof tickCb === "function" ? tickCb : null;
+    onDone = typeof doneCb === "function" ? doneCb : null;
+
+    if (onTick) {
+      onTick(remaining, total);
+    }
+
+    if (remaining > 0) {
+      startTimer();
+    }
+  }
+
+  // Para completamente o cronômetro e zera o tempo
+  function stop() {
+    clearTimer();
+    remaining = 0;
+    total = 0;
+  }
+
+  // Pausa sem perder o tempo restante
+  function pause() {
+    clearTimer();
+  }
+
+  // Continua de onde parou
+  function resume() {
+    if (intervalId !== null || remaining <= 0) {
+      return;
+    }
+
+    startTimer();
+  }
+
+  function isRunning() {
+    return intervalId !== null;
+  }
+
+  function getRemaining() {
+    return remaining;
+  }
+
+  function getTotal() {
+    return total;
+  }
+
+  return {
+    start,
+    stop,
+    pause,
+    resume,
+    isRunning,
+    getRemaining,
+    getTotal
+  };
 })();
+```
