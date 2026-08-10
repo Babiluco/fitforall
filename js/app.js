@@ -11,7 +11,7 @@ let exerciseSearch = '';
 let historyFilter = 'semana';
 let runnerCtx = null; // contexto ativo do treino em execução
 
-function persist(){ saveState(state); }
+function persist(){ return saveState(state); }
 
 /* -------------------------------------------------------------------- */
 /* Treinos personalizados: mescla os overrides salvos pelo usuário      */
@@ -47,10 +47,73 @@ function boot(){
   navigate('dashboard');
   maybeGenerateNotifications();
   setupKeyboardAccessibility();
+  checkForRecoverableSession();
   setTimeout(()=>{
     const loader = document.getElementById('loader');
     if(loader){ loader.style.opacity='0'; setTimeout(()=>loader.remove(),400); }
   }, 500);
+}
+
+/* ======================================================================
+   RECUPERAÇÃO DE TREINO EM ANDAMENTO
+   ====================================================================== */
+function checkForRecoverableSession(){
+  const s = state.activeWorkoutSession;
+  if(!isValidActiveSession(s)) return;
+  const tpl = getTemplate(s.templateId);
+  const doneSets = s.sets.reduce((a,ex)=>a+ex.filter(x=>x.done).length,0);
+  const totalSets = s.sets.reduce((a,ex)=>a+ex.length,0);
+  const startedDate = new Date(s.startedAt);
+  openModal(`
+    <h2 style="margin-bottom:6px;">Você tem um treino em andamento</h2>
+    <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px;">${tpl.name} · iniciado ${fmtDate(todayKey(startedDate))} às ${String(startedDate.getHours()).padStart(2,'0')}:${String(startedDate.getMinutes()).padStart(2,'0')}</p>
+    <div class="progress-track" style="margin-bottom:8px;"><div class="progress-fill" style="width:${totalSets?Math.round(doneSets/totalSets*100):0}%;"></div></div>
+    <p style="font-size:12.5px;color:var(--text-dim);margin-bottom:18px;">${doneSets} de ${totalSets} séries concluídas</p>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-ghost" id="discardSessionBtn" style="flex:1;">Descartar</button>
+      <button class="btn btn-primary" id="resumeSessionBtn" style="flex:1;">Continuar treino</button>
+    </div>
+  `);
+  document.getElementById('discardSessionBtn').addEventListener('click', ()=>{
+    discardActiveSession();
+    closeModal();
+    showToast('Treino descartado', 'Você pode começar um novo quando quiser.', '🗑️');
+  });
+  document.getElementById('resumeSessionBtn').addEventListener('click', ()=>{
+    closeModal();
+    resumeActiveSession(s);
+  });
+}
+
+function resumeActiveSession(s){
+  runnerCtx = {
+    id: s.id, templateId: s.templateId, dateKey: s.dateKey, mood: s.mood,
+    exIndex: s.exIndex, startTime: s.startedAt,
+    lastCompleted: s.lastCompleted, restState: s.restState,
+    sets: s.sets,
+  };
+  let el = document.getElementById('runnerRoot');
+  if(!el){ el = document.createElement('div'); el.id='runnerRoot'; document.body.appendChild(el); }
+  el.innerHTML = `<div class="runner" id="runnerEl"></div>`;
+  requestAnimationFrame(()=>document.getElementById('runnerEl').classList.add('open'));
+  renderRunnerExercise();
+  startRunnerClock();
+
+  if(runnerCtx.restState){
+    const remaining = Math.round((runnerCtx.restState.endsAt-Date.now())/1000);
+    if(runnerCtx.restState.paused){
+      // estava pausado — reabre já pausado, sem deixar o tempo correr
+      startRestOverlay(runnerCtx.restState.pausedRemaining, Date.now()+runnerCtx.restState.pausedRemaining*1000);
+      document.getElementById('restPauseBtn')?.click();
+    } else if(remaining>0){
+      startRestOverlay(remaining, runnerCtx.restState.endsAt);
+    } else {
+      runnerCtx.restState = null;
+      persistRunnerSession();
+      showToast('Descanso já tinha terminado', 'Hora de voltar para a próxima série!', '⏱');
+    }
+  }
+  showToast('Treino retomado', 'Continuando de onde você parou.', '▶️');
 }
 
 /* ======================================================================
@@ -1697,12 +1760,14 @@ function undoLastSet(){
   }
   runnerCtx.lastCompleted = null;
   closeRestOverlay();
+  persistRunnerSession();
   if(exIndex===runnerCtx.exIndex) renderRunnerExercise();
   showToast('Série desfeita', 'Marcada como não concluída novamente.', '↩️');
 }
 
 function closeRestOverlay(){
   RestTimer.stop();
+  if(runnerCtx){ runnerCtx.restState = null; persistRunnerSession(); }
   const overlay = document.getElementById('restOverlay');
   if(overlay){
     overlay.classList.remove('open');
@@ -1731,6 +1796,22 @@ function finishWorkout(){
     id:cryptoId(), templateId:runnerCtx.templateId, name:tpl.name,
     date: runnerCtx.dateKey, duration:durationMin, volume, calories, exercisesLog,
   };
+
+  // -------------------------------------------------------------------
+  // Grava tudo em memória, tenta salvar UMA vez, e só marca a sessão
+  // ativa como concluída se esse save realmente funcionou — assim uma
+  // falha de armazenamento (disco cheio, por ex.) nunca troca uma sessão
+  // ativa recuperável por um treino que não foi salvo de verdade.
+  // -------------------------------------------------------------------
+  const rollback = {
+    historyLength: state.history.length,
+    completedDate: state.completedDates[runnerCtx.dateKey],
+    activeSession: state.activeWorkoutSession,
+    exerciseLoadsSnapshot: JSON.parse(JSON.stringify(state.exerciseLoads)),
+    bestStreak: state.bestStreak,
+    fullWeeksCompleted: state.fullWeeksCompleted,
+  };
+
   state.history.push(session);
   state.completedDates[runnerCtx.dateKey] = runnerCtx.templateId;
 
@@ -1756,7 +1837,24 @@ function finishWorkout(){
     state.fullWeeksCompleted = (state.fullWeeksCompleted||0)+1;
   }
 
-  persist();
+  state.activeWorkoutSession = null; // só vale se o persist() abaixo funcionar
+
+  const ok = persist();
+  if(!ok){
+    // desfaz tudo — o treino continua ativo e recuperável, nada se perde
+    state.history.length = rollback.historyLength;
+    if(rollback.completedDate===undefined) delete state.completedDates[runnerCtx.dateKey];
+    else state.completedDates[runnerCtx.dateKey] = rollback.completedDate;
+    state.exerciseLoads = rollback.exerciseLoadsSnapshot;
+    state.bestStreak = rollback.bestStreak;
+    state.fullWeeksCompleted = rollback.fullWeeksCompleted;
+    state.activeWorkoutSession = rollback.activeSession;
+    persistRunnerSession();
+    showToast('Não foi possível salvar', 'Sem espaço de armazenamento. Seu treino continua salvo — tente novamente.', '⚠️');
+    startRunnerClock();
+    return;
+  }
+
   checkAchievements();
   addXp(50);
 
