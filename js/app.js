@@ -47,7 +47,6 @@ function boot(){
   navigate('dashboard');
   maybeGenerateNotifications();
   setupKeyboardAccessibility();
-  setupVisibilityResync();
   checkForRecoverableSession();
   setTimeout(()=>{
     const loader = document.getElementById('loader');
@@ -144,36 +143,6 @@ function setupKeyboardAccessibility(){
     if(el && el.getAttribute && el.getAttribute('role')==='button' && el.tagName!=='BUTTON'){
       e.preventDefault();
       el.click();
-    }
-  });
-}
-
-/* Em celulares (iOS Safari em especial), o navegador pausa ou atrasa
-   bastante o setInterval quando a tela bloqueia ou o usuário troca de
-   app. O cálculo de tempo restante já é feito a partir de um timestamp
-   (endsAt), então o valor nunca fica errado — mas sem isto aqui a tela
-   só atualiza no próximo tick do interval, que pode demorar vários
-   segundos para disparar de novo, dando a impressão de que travou. */
-function setupVisibilityResync(){
-  document.addEventListener('visibilitychange', ()=>{
-    if(document.visibilityState!=='visible') return;
-    if(runnerCtx) updateRunnerClock();
-    if(runnerCtx && runnerCtx.restState){
-      const label = document.getElementById('restTimeLabel');
-      const ring = document.getElementById('restRingFg');
-      const clamped = Math.max(0, Math.round((runnerCtx.restState.endsAt-Date.now())/1000));
-      if(label) label.textContent = clamped;
-      if(ring){
-        const circumference = 2*Math.PI*90;
-        ring.style.strokeDashoffset = circumference * (1 - clamped/Math.max(runnerCtx.restState.totalSeconds,1));
-      }
-      // Se o tempo já tiver acabado enquanto o app estava em segundo
-      // plano, fecha o overlay de descanso em vez de deixá-lo parado em 0.
-      if(clamped<=0 && document.getElementById('restOverlay')){
-        RestTimer.stop();
-        closeRestOverlay();
-        showToast('Descanso finalizado', 'Hora de voltar para a próxima série!', '⏱');
-      }
     }
   });
 }
@@ -1358,15 +1327,16 @@ function openRunner(templateId, dateKey, mood){
     restState:null,      // {endsAt(timestamp), totalSeconds, paused, pausedRemaining} — null quando não tá descansando
     sets: tpl.exercises.map(ex=>{
       const n = ex.sets||1;
-      // Sugestão de carga: usa o último peso registrado desse exercício
-      // (histórico real), caindo pro valor planejado no treino só se não
-      // houver histórico ainda. Calculado uma única vez aqui, não a cada
-      // render.
-      const history = state.exerciseLoads[ex.exerciseId]||[];
-      const baseLoad = history.length ? history[history.length-1].weight : (ex.load||0);
+      // Defaults vêm da última performance real do histórico concluído.
+      // exerciseLoads segue como fallback de compatibilidade para dados antigos.
+      const lastSet = WorkoutProgression.mostRecentValidSet(state.history, ex.exerciseId, dateKey);
+      const legacyLoads = state.exerciseLoads[ex.exerciseId]||[];
+      const legacyLoad = legacyLoads.length ? legacyLoads[legacyLoads.length-1].weight : null;
+      const baseLoad = lastSet ? lastSet.weight : (legacyLoad || ex.load || 0);
+      const baseReps = lastSet ? lastSet.reps : (ex.reps||0);
       return Array.from({length:n}, ()=>({
         weight: baseLoad ? Math.round(baseLoad*loadMultiplier) : 0,
-        reps: ex.reps||0,
+        reps: baseReps,
         notes:'',
         done:false,
         skipped:false,
@@ -1461,6 +1431,75 @@ function closeRunner(){
   runnerCtx = null;
 }
 
+function formatSetLine(set){
+  return `${WorkoutProgression.formatNumber(set.weight)} kg × ${Number(set.reps)||0}`;
+}
+
+function renderPreviousPerformance(previous){
+  if(!previous){
+    return `<div class="previous-performance empty"><span>Workout anterior</span><b>Primeira vez</b></div>`;
+  }
+  return `
+    <div class="previous-performance">
+      <span>Workout anterior</span>
+      <div class="previous-set-list">
+        ${previous.sets.map(set=>`<b>${formatSetLine(set)}</b>`).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function firstOpenSetIndex(setsArr){
+  const index = setsArr.findIndex(s=>!s.done && !s.skipped);
+  return index>=0 ? index : -1;
+}
+
+function adjustRunnerSetValue(setIndex, field, delta){
+  if(!runnerCtx) return;
+  const setsArr = runnerCtx.sets[runnerCtx.exIndex];
+  const set = setsArr && setsArr[setIndex];
+  if(!set || set.done || set.skipped) return;
+  const min = 0;
+  const next = Math.max(min, Number(set[field]||0) + delta);
+  set[field] = field==='weight' ? Math.round(next*10)/10 : Math.round(next);
+  persistRunnerSession();
+  renderRunnerExercise();
+}
+
+function setRunnerSetValue(setIndex, field, value){
+  if(!runnerCtx) return;
+  const setsArr = runnerCtx.sets[runnerCtx.exIndex];
+  const set = setsArr && setsArr[setIndex];
+  if(!set || set.done || set.skipped) return;
+  const next = Math.max(0, Number(value)||0);
+  set[field] = field==='weight' ? Math.round(next*10)/10 : Math.round(next);
+  debouncedPersistRunnerSession();
+}
+
+function completeRunnerSet(setIndex, options){
+  if(!runnerCtx) return;
+  const tpl = getTemplate(runnerCtx.templateId);
+  const exDef = tpl.exercises[runnerCtx.exIndex];
+  const exercise = findExercise(exDef.exerciseId);
+  const setsArr = runnerCtx.sets[runnerCtx.exIndex];
+  const set = setsArr[setIndex];
+  if(!set || set.done || set.skipped) return;
+
+  set.done = true;
+  runnerCtx.lastCompleted = {exIndex:runnerCtx.exIndex, setIndex};
+  persistRunnerSession();
+
+  const pr = WorkoutProgression.detectSetPR(state.history, exDef.exerciseId, set, setsArr, runnerCtx.dateKey);
+  if(pr){
+    showToast('Novo PR', `${exercise ? exercise.name : exDef.exerciseId} — ${pr.value}`, '🏆');
+  } else {
+    showToast('1 série concluída', 'Desfazer disponível no descanso.', '✅');
+  }
+
+  if(!options || options.startRest!==false) openRestTimerPicker(exDef.rest||60, true);
+  renderRunnerExercise();
+}
+
 function renderRunnerExercise(){
   const runnerEl = document.getElementById('runnerEl');
   if(!runnerEl || !runnerCtx) return;
@@ -1468,11 +1507,23 @@ function renderRunnerExercise(){
   const exDef = tpl.exercises[runnerCtx.exIndex];
   const e = findExercise(exDef.exerciseId);
   const setsArr = runnerCtx.sets[runnerCtx.exIndex];
-  const last = lastLoadFor(exDef.exerciseId, todayKey());
   const allDone = setsArr.every(s=>s.done || s.skipped);
   const isLast = runnerCtx.exIndex === tpl.exercises.length-1;
   const doneCount = setsArr.filter(s=>s.done).length;
   const progressPct = ((runnerCtx.exIndex + (setsArr.length?doneCount/setsArr.length:0)) / tpl.exercises.length) * 100;
+  const previous = WorkoutProgression.previousPerformance(state.history, exDef.exerciseId, runnerCtx.dateKey);
+  const activeSetIndex = firstOpenSetIndex(setsArr);
+  const activeSet = activeSetIndex>=0 ? setsArr[activeSetIndex] : null;
+  const weightStep = WorkoutProgression.inferWeightStep(exDef, previous);
+  const summary = WorkoutProgression.exerciseSummary(state.history, exDef.exerciseId, setsArr, runnerCtx.dateKey);
+  const progression = WorkoutProgression.progressionSuggestion({
+    history: state.history,
+    exerciseId: exDef.exerciseId,
+    exercise: e,
+    exerciseDef: exDef,
+    currentSets: setsArr,
+    beforeDate: runnerCtx.dateKey,
+  });
 
   runnerEl.innerHTML = `
     <div class="runner-header">
@@ -1488,7 +1539,38 @@ function renderRunnerExercise(){
       <div class="runner-exercise-media ${allDone?'complete':''}" id="runnerMedia">${MUSCLE_ICONS[e.muscle]||'🏋️'}</div>
       <div class="runner-title">${e.name}</div>
       <div class="runner-muscle">${capitalize(e.muscle)} · ${exDef.sets} séries × ${exDef.reps} reps · ⏱ ${exDef.rest||60}s descanso</div>
-      ${last ? `<div class="rest-compare">Última vez: <b>${last.weight}kg</b> · Sugestão de hoje: <b>${setsArr[0]?.weight||0}kg</b></div>` : ''}
+      ${renderPreviousPerformance(previous)}
+
+      ${activeSet ? `
+        <div class="quick-set-card" data-quick-set="${activeSetIndex}" tabindex="0" aria-label="Registrar série ${activeSetIndex+1}">
+          <div class="quick-set-head">
+            <span>Série ${activeSetIndex+1} de ${setsArr.length}</span>
+            ${runnerCtx.lastCompleted?`<button class="btn btn-ghost btn-sm" id="runnerUndoBtn">Desfazer</button>`:''}
+          </div>
+          <div class="quick-control" data-control="weight">
+            <button class="quick-step" data-adjust-field="weight" data-adjust-set="${activeSetIndex}" data-adjust-delta="${-weightStep}" aria-label="Diminuir carga">−</button>
+            <div class="quick-value">
+              <label for="quickWeightInput">Peso</label>
+              <input id="quickWeightInput" type="number" min="0" step="${weightStep}" inputmode="decimal" value="${activeSet.weight}" data-quick-field="weight" data-quick-set="${activeSetIndex}" aria-label="Carga da série atual">
+            </div>
+            <button class="quick-step" data-adjust-field="weight" data-adjust-set="${activeSetIndex}" data-adjust-delta="${weightStep}" aria-label="Aumentar carga">+</button>
+          </div>
+          <div class="quick-control" data-control="reps">
+            <button class="quick-step" data-adjust-field="reps" data-adjust-set="${activeSetIndex}" data-adjust-delta="-1" aria-label="Diminuir repetições">−</button>
+            <div class="quick-value">
+              <label for="quickRepsInput">Reps</label>
+              <input id="quickRepsInput" type="number" min="0" step="1" inputmode="numeric" value="${activeSet.reps}" data-quick-field="reps" data-quick-set="${activeSetIndex}" aria-label="Repetições da série atual">
+            </div>
+            <button class="quick-step" data-adjust-field="reps" data-adjust-set="${activeSetIndex}" data-adjust-delta="1" aria-label="Aumentar repetições">+</button>
+          </div>
+          <button class="btn btn-primary btn-block quick-complete" data-complete-set="${activeSetIndex}">Concluir série</button>
+        </div>
+      ` : `
+        <div class="quick-set-card complete">
+          <div class="quick-done-title">Todas as séries deste exercício foram registradas.</div>
+          ${runnerCtx.lastCompleted?`<button class="btn btn-ghost btn-sm" id="runnerUndoBtn">Desfazer última série</button>`:''}
+        </div>
+      `}
 
       <div class="set-tracker" id="setTracker">
         ${setsArr.map((s,i)=>`
@@ -1498,14 +1580,22 @@ function renderRunnerExercise(){
               <div class="set-skipped-label">Série pulada</div>
               <button class="btn btn-ghost btn-sm" data-unskip="${i}">Reverter</button>
             ` : `
-              <div class="set-field"><label>Kg</label><input type="number" min="0" step="0.5" value="${s.weight}" data-field="weight" data-set="${i}" aria-label="Carga da série ${i+1}"></div>
+              <div class="set-field"><label>Kg</label><input type="number" min="0" step="${weightStep}" value="${s.weight}" data-field="weight" data-set="${i}" aria-label="Carga da série ${i+1}"></div>
               <div class="set-field"><label>Reps</label><input type="number" min="0" value="${s.reps}" data-field="reps" data-set="${i}" aria-label="Repetições da série ${i+1}"></div>
               <button class="icon-btn set-skip-btn" data-skip="${i}" aria-label="Pular série ${i+1}" title="Pular série">${icon('x',{size:14})}</button>
-              <button class="set-check" data-check="${i}" aria-label="${s.done?'Desmarcar':'Marcar'} série ${i+1} como concluída">${s.done?icon('check',{size:18}):''}</button>
+              <button class="set-check" data-check="${i}" aria-label="${s.done?'Série concluída':'Concluir série '+(i+1)}">${s.done?icon('check',{size:18}):''}</button>
             `}
           </div>
         `).join('')}
       </div>
+      <div class="exercise-summary">
+        <div><span>Séries</span><b>${summary.setsCompleted}/${setsArr.length}</b></div>
+        <div><span>Reps</span><b>${summary.totalReps}</b></div>
+        <div><span>Volume</span><b>${WorkoutProgression.formatNumber(summary.currentVolume)} kg</b></div>
+        <div><span>Anterior</span><b>${summary.previousVolume ? `${WorkoutProgression.formatNumber(summary.previousVolume)} kg` : '—'}</b></div>
+        <div><span>Atual vs anterior</span><b>${summary.deltaPct===null ? '—' : `${summary.deltaPct>=0?'↑':'↓'} ${Math.abs(summary.deltaPct).toFixed(1)}%`}</b></div>
+      </div>
+      ${progression ? `<div class="progression-suggestion"><b>${progression.message}</b><span>${progression.next}</span></div>` : ''}
       <button class="btn btn-ghost btn-sm" id="showInfoBtn" style="margin-top:16px;">ℹ️ Ver execução correta</button>
     </div>
     <div class="runner-footer">
@@ -1525,6 +1615,44 @@ function renderRunnerExercise(){
   document.getElementById('runnerRestBtn').addEventListener('click', ()=>openRestTimerPicker(exDef.rest||60));
   document.getElementById('showInfoBtn').addEventListener('click', ()=>openExerciseModal(e.id));
 
+  runnerEl.querySelectorAll('[data-adjust-field]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      adjustRunnerSetValue(Number(btn.dataset.adjustSet), btn.dataset.adjustField, Number(btn.dataset.adjustDelta));
+    });
+  });
+  runnerEl.querySelectorAll('[data-quick-field]').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      setRunnerSetValue(Number(inp.dataset.quickSet), inp.dataset.quickField, inp.value);
+    });
+    inp.addEventListener('blur', ()=>{
+      persistRunnerSession();
+      renderRunnerExercise();
+    });
+  });
+  runnerEl.querySelectorAll('[data-complete-set]').forEach(btn=>{
+    btn.addEventListener('click', ()=>completeRunnerSet(Number(btn.dataset.completeSet)));
+  });
+  const quickCard = runnerEl.querySelector('[data-quick-set]');
+  if(quickCard){
+    quickCard.addEventListener('keydown', (event)=>{
+      const isInput = ['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName);
+      if(isInput) return;
+      const setIndex = Number(quickCard.dataset.quickSet);
+      if(event.key==='Enter'){
+        event.preventDefault();
+        completeRunnerSet(setIndex);
+      } else if(event.key==='ArrowUp'){
+        event.preventDefault();
+        adjustRunnerSetValue(setIndex, 'weight', weightStep);
+      } else if(event.key==='ArrowDown'){
+        event.preventDefault();
+        adjustRunnerSetValue(setIndex, 'weight', -weightStep);
+      }
+    });
+  }
+  const undoInlineBtn = document.getElementById('runnerUndoBtn');
+  if(undoInlineBtn) undoInlineBtn.addEventListener('click', undoLastSet);
+
   runnerEl.querySelectorAll('[data-field]').forEach(inp=>{
     inp.addEventListener('input', ()=>{
       const i = Number(inp.dataset.set);
@@ -1535,13 +1663,12 @@ function renderRunnerExercise(){
   runnerEl.querySelectorAll('[data-check]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const i = Number(btn.dataset.check);
-      setsArr[i].done = !setsArr[i].done;
       if(setsArr[i].done){
         runnerCtx.lastCompleted = {exIndex:runnerCtx.exIndex, setIndex:i};
-        openRestTimerPicker(exDef.rest||60, true);
+        undoLastSet();
+      } else {
+        completeRunnerSet(i);
       }
-      persistRunnerSession(); // dado crítico (série concluída) — nunca fica no debounce
-      renderRunnerExercise();
     });
   });
   runnerEl.querySelectorAll('[data-skip]').forEach(btn=>{
@@ -3201,3 +3328,4 @@ function closeModal(){
    ====================================================================== */
 
 document.addEventListener('DOMContentLoaded', boot);
+
