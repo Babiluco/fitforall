@@ -534,6 +534,43 @@ main.view-wrap{
 @keyframes exercisePulse{0%{transform:scale(1);}50%{transform:scale(1.03);}100%{transform:scale(1);}}
 .runner-title{font-size:22px;font-weight:800;text-align:center;}
 .runner-muscle{color:var(--text-dim);font-size:13px;margin-top:4px;text-align:center;}
+.previous-performance{
+  width:100%;max-width:400px;margin-top:16px;padding:12px 14px;border:1px solid var(--border);
+  border-radius:var(--radius-sm);background:var(--bg-card);display:flex;align-items:flex-start;justify-content:space-between;gap:14px;
+}
+.previous-performance span{font-size:11px;color:var(--text-faint);font-weight:700;text-transform:uppercase;}
+.previous-performance b{font-size:13px;line-height:1.45;}
+.previous-performance.empty{align-items:center;}
+.previous-set-list{display:flex;flex-direction:column;gap:2px;text-align:right;}
+.quick-set-card{
+  width:100%;max-width:400px;margin-top:16px;padding:14px;background:var(--bg-card);border:1px solid var(--border);
+  border-radius:var(--radius);display:flex;flex-direction:column;gap:12px;box-shadow:var(--shadow-sm);
+}
+.quick-set-card.complete{align-items:center;text-align:center;}
+.quick-set-card:focus-visible{outline:2px solid var(--accent-text);outline-offset:3px;}
+.quick-set-head{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:36px;}
+.quick-set-head span{font-size:12px;color:var(--text-dim);font-weight:800;text-transform:uppercase;}
+.quick-done-title{font-size:14px;font-weight:700;color:var(--text);}
+.quick-control{
+  display:grid;grid-template-columns:58px minmax(0,1fr) 58px;align-items:stretch;gap:10px;
+}
+.quick-step{
+  min-height:56px;border-radius:var(--radius-sm);background:var(--bg-elevated);border:1px solid var(--border);
+  color:var(--text);font-size:26px;font-weight:800;transition:background .2s, transform .15s var(--ease);
+}
+.quick-step:hover{background:var(--bg-card-hover);}
+.quick-step:active{transform:scale(.94);}
+.quick-value{
+  min-width:0;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-elevated);
+  display:flex;flex-direction:column;justify-content:center;align-items:center;padding:6px 8px;
+}
+.quick-value label{font-size:10px;color:var(--text-faint);font-weight:800;text-transform:uppercase;}
+.quick-value input{
+  width:100%;height:32px;border:0;background:transparent;color:var(--text);font-family:var(--font-display);
+  font-size:22px;font-weight:800;text-align:center;padding:0;
+}
+.quick-value input:focus{outline:none;}
+.quick-complete{min-height:54px;font-size:15px;}
 .set-tracker{width:100%;max-width:400px;margin-top:24px;display:flex;flex-direction:column;gap:12px;}
 .set-row{
   display:flex;align-items:center;gap:10px;background:var(--bg-card);border:1px solid var(--border);
@@ -555,6 +592,21 @@ main.view-wrap{
 .set-row.done .set-check{background:var(--green);border-color:var(--green);color:#fff;}
 .set-skip-btn{width:48px;height:48px;flex-shrink:0;color:var(--text-faint);}
 .set-skipped-label{flex:1;font-size:13px;color:var(--text-faint);font-style:italic;}
+.exercise-summary{
+  width:100%;max-width:400px;margin-top:16px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;
+}
+.exercise-summary div{
+  background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;min-height:58px;
+}
+.exercise-summary span{display:block;font-size:10.5px;color:var(--text-faint);font-weight:700;text-transform:uppercase;margin-bottom:3px;}
+.exercise-summary b{font-size:14px;}
+.exercise-summary div:nth-child(3){grid-column:1/-1;}
+.progression-suggestion{
+  width:100%;max-width:400px;margin-top:12px;border:1px solid rgba(34,197,94,.35);background:rgba(34,197,94,.08);
+  border-radius:var(--radius-sm);padding:12px 14px;
+}
+.progression-suggestion b{display:block;font-size:13px;margin-bottom:3px;}
+.progression-suggestion span{font-size:12px;color:var(--text-dim);}
 .runner-footer{padding:16px 20px calc(16px + env(safe-area-inset-bottom));border-top:1px solid var(--border);}
 .rest-compare{font-size:12px;color:var(--text-dim);margin-top:14px;text-align:center;}
 .rest-compare b{color:var(--text);}
