@@ -9,9 +9,29 @@ const RestTimer = (function(){
   let onTick = null;
   let onDone = null;
 
+  // Um único AudioContext reaproveitado entre todos os beeps. Criar um
+  // novo AudioContext a cada chamada (e nunca fechá-lo) acumula contextos
+  // vivos na memória — no Chrome/Windows isso passa despercebido, mas no
+  // Safari iOS e no Chrome Android o limite de contextos simultâneos é bem
+  // mais apertado, e o WebView acaba travando depois de alguns descansos.
+  let audioCtx = null;
+  function getAudioCtx(){
+    if(!audioCtx){
+      const Ctx = window.AudioContext||window.webkitAudioContext;
+      if(!Ctx) return null;
+      audioCtx = new Ctx();
+    }
+    return audioCtx;
+  }
+
   function beep(){
     try{
-      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      const ctx = getAudioCtx();
+      if(!ctx) return;
+      // iOS suspende o contexto quando o app fica em segundo plano —
+      // precisa "acordar" antes de tocar, senão o som (e, em alguns
+      // casos, chamadas futuras) simplesmente não funciona.
+      if(ctx.state==='suspended') ctx.resume();
       [0,0.18,0.36].forEach((t,i)=>{
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
