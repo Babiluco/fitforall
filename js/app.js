@@ -47,6 +47,7 @@ function boot(){
   navigate('dashboard');
   maybeGenerateNotifications();
   setupKeyboardAccessibility();
+  setupVisibilityResync();
   checkForRecoverableSession();
   setTimeout(()=>{
     const loader = document.getElementById('loader');
@@ -143,6 +144,36 @@ function setupKeyboardAccessibility(){
     if(el && el.getAttribute && el.getAttribute('role')==='button' && el.tagName!=='BUTTON'){
       e.preventDefault();
       el.click();
+    }
+  });
+}
+
+/* Em celulares (iOS Safari em especial), o navegador pausa ou atrasa
+   bastante o setInterval quando a tela bloqueia ou o usuário troca de
+   app. O cálculo de tempo restante já é feito a partir de um timestamp
+   (endsAt), então o valor nunca fica errado — mas sem isto aqui a tela
+   só atualiza no próximo tick do interval, que pode demorar vários
+   segundos para disparar de novo, dando a impressão de que travou. */
+function setupVisibilityResync(){
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState!=='visible') return;
+    if(runnerCtx) updateRunnerClock();
+    if(runnerCtx && runnerCtx.restState){
+      const label = document.getElementById('restTimeLabel');
+      const ring = document.getElementById('restRingFg');
+      const clamped = Math.max(0, Math.round((runnerCtx.restState.endsAt-Date.now())/1000));
+      if(label) label.textContent = clamped;
+      if(ring){
+        const circumference = 2*Math.PI*90;
+        ring.style.strokeDashoffset = circumference * (1 - clamped/Math.max(runnerCtx.restState.totalSeconds,1));
+      }
+      // Se o tempo já tiver acabado enquanto o app estava em segundo
+      // plano, fecha o overlay de descanso em vez de deixá-lo parado em 0.
+      if(clamped<=0 && document.getElementById('restOverlay')){
+        RestTimer.stop();
+        closeRestOverlay();
+        showToast('Descanso finalizado', 'Hora de voltar para a próxima série!', '⏱');
+      }
     }
   });
 }
